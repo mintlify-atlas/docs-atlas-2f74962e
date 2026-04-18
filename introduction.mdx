@@ -1,0 +1,68 @@
+---
+title: "gosec: Static Security Analysis for Go"
+description: "gosec inspects Go source code for security vulnerabilities using AST and SSA analysis, covering injection, crypto, filesystem, and taint issues."
+---
+
+gosec is an open-source static analysis tool for Go that scans your source code for security vulnerabilities. It works by analyzing the Go abstract syntax tree (AST) and static single assignment (SSA) form to detect patterns that indicate security weaknesses — from hardcoded credentials to SQL injection and weak cryptography.
+
+## How gosec works
+
+gosec operates in three analysis modes:
+
+<CardGroup cols={3}>
+  <Card title="AST Rules" icon="tree">
+    Pattern-based checks that inspect Go syntax trees. Used for rules like hardcoded credentials (G101), SQL string building (G201), and weak crypto imports (G5xx).
+  </Card>
+  <Card title="SSA Analyzers" icon="diagram-project">
+    Whole-program analysis using the static single assignment form. Enables precise checks like integer overflow (G115), hardcoded nonces (G407), and context propagation failures (G118).
+  </Card>
+  <Card title="Taint Analysis" icon="droplet">
+    Data flow tracking from untrusted sources (HTTP requests, env vars) to dangerous sinks. Catches SQL injection (G701), command injection (G702), SSRF (G704), and more.
+  </Card>
+</CardGroup>
+
+## Rule categories
+
+gosec ships with 50+ rules organized into seven categories:
+
+| Prefix | Category | Examples |
+|--------|----------|---------|
+| G1xx | General secure coding | Hardcoded credentials, HTTP hardening, cookie security |
+| G2xx | Injection patterns | SQL construction, template escaping, subprocess calls |
+| G3xx | Filesystem & permissions | File permissions, path traversal, zip extraction |
+| G4xx | Crypto & TLS | Weak algorithms, bad TLS settings, hardcoded IVs |
+| G5xx | Import blocklist | Dangerous crypto packages (MD5, DES, RC4) |
+| G6xx | Language/runtime safety | Range aliasing, slice bounds out of range |
+| G7xx | Taint analysis | SQL, command, path, SSRF, XSS, log, SMTP injection |
+
+## CWE mapping
+
+Every issue gosec detects is mapped to a [Common Weakness Enumeration (CWE)](https://cwe.mitre.org/) identifier. This makes it straightforward to correlate findings with your organization's vulnerability management process and prioritize remediation.
+
+## Suppression and false positives
+
+When gosec flags code that you have verified is safe, you can suppress the finding inline using a `#nosec` comment:
+
+```go
+//#nosec G401 -- MD5 used only for cache key, not security
+hash := md5.Sum(data)
+```
+
+See [Suppressing false positives](/usage/nosec-annotations) for the full annotation syntax.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install gosec via Go modules, Docker, or the GitHub Action.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Scan your first project and interpret the results.
+  </Card>
+  <Card title="Rules reference" icon="shield-halved" href="/rules/overview">
+    Browse all rules with CWE mappings and configuration options.
+  </Card>
+  <Card title="GitHub Actions" icon="github" href="/integrations/github-actions">
+    Integrate gosec into your CI pipeline.
+  </Card>
+</CardGroup>

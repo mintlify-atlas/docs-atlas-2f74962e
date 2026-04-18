@@ -1,0 +1,158 @@
+---
+title: "Suppressing false positives with nosec annotations"
+description: "Use #nosec comments and gosec:disable directives to suppress specific gosec rules inline, with optional justification text for audit trails."
+---
+
+Automated static analysis tools produce false positives. When gosec flags code that you have manually verified as safe, you can suppress the finding inline using a `#nosec` comment or a `//gosec:disable` directive. Suppressions can target specific rules or silence all rules on a given line. You can also record a justification that gosec captures in suppression-aware report formats.
+
+## The `#nosec` comment
+
+Place a `#nosec` comment on the same line where the warning is reported. gosec will not emit a finding for that line.
+
+```go
+func main() {
+    tr := &http.Transport{
+        TLSClientConfig: &tls.Config{
+            InsecureSkipVerify: true, // #nosec G402
+        },
+    }
+
+    client := &http.Client{Transport: tr}
+    _, err := client.Get("https://go.dev/")
+    if err != nil {
+        fmt.Println(err)
+    }
+}
+```
+
+<Warning>
+The `#nosec` comment must be on the exact line where gosec reports the warning. Placing it on a surrounding line has no effect.
+</Warning>
+
+## Comment format
+
+The full format is:
+
+```
+#nosec [RuleList] [-- Justification]
+```
+
+| Part | Required | Description |
+|------|----------|-------------|
+| `#nosec` | Yes | The annotation keyword |
+| `RuleList` | No | One or more space-separated rule IDs (e.g. `G101 G102`). Omit to suppress all rules on the line. |
+| `-- Justification` | No | Free-text explanation. Must start with two or more dashes. |
+
+### Suppress all rules on a line
+
+```go
+password := "hunter2" // #nosec
+```
+
+### Suppress a specific rule
+
+```go
+password := "hunter2" // #nosec G101
+```
+
+### Suppress multiple specific rules
+
+```go
+result, _ := exec.Command(cmd, args...).Output() //#nosec G204 G204
+```
+
+The comment can use `//` or `/* */` style:
+
+```go
+result := md5.Sum(data) /* #nosec G401 */
+```
+
+### Suppress with justification
+
+The justification text follows two or more dashes and is captured in SARIF and JSON reports when `-track-suppressions` is enabled.
+
+```go
+//#nosec G101 G102 -- This is a false positive; credentials are loaded from env
+password := os.Getenv("PASSWORD")
+```
+
+## The `//gosec:disable` directive
+
+`//gosec:disable` is an alternative to `#nosec` with identical behavior and the same format for rule lists and justifications.
+
+```go
+//gosec:disable G101 -- This is a false positive
+password := os.Getenv("PASSWORD")
+```
+
+Both forms can be used interchangeably; choose whichever fits your team's conventions.
+
+## Ignoring all annotations at scan time
+
+To run gosec and treat all `#nosec` and `//gosec:disable` annotations as if they were absent, use the `-nosec` flag. This is useful for auditing how many suppressions exist and whether they are still warranted.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-nosec` | `false` | Ignore all `#nosec` and `//gosec:disable` annotations during the scan |
+
+```bash
+gosec -nosec=true ./...
+```
+
+## Showing suppressed findings
+
+By default, suppressed findings do not appear in the report. Use `-show-ignored` to include them so you can review all suppressions in one output.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-show-ignored` | `false` | Include suppressed findings in the report output |
+
+```bash
+gosec -show-ignored ./...
+```
+
+## Using a custom annotation string
+
+If your codebase uses a project-specific comment tag instead of `#nosec`, you can redirect gosec to recognize that tag with `-nosec-tag`.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-nosec-tag` | _(none)_ | Treat this string as equivalent to `#nosec` |
+
+```bash
+gosec -nosec-tag "#dontanalyze" ./...
+gosec -nosec-tag "#falsepositive" ./...
+```
+
+## Tracking suppressions for auditing
+
+The `-track-suppressions` flag causes gosec to embed suppression metadata in the report for each suppressed finding. This is useful for compliance workflows and security reviews.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-track-suppressions` | `false` | Emit suppression kind and justification in the report |
+
+<Warning>
+Only `sarif` and `json` output formats support suppression tracking. Using this flag with other formats has no effect.
+</Warning>
+
+```bash
+gosec -track-suppressions -fmt sarif -out results.sarif ./...
+```
+
+Each suppression record includes:
+
+| Field | Value |
+|-------|-------|
+| `kind` | `inSource` for inline `#nosec` annotations |
+| `kind` | `external` for rules excluded via `-include`/`-exclude` flags |
+| `justification` | The text after `--` in the annotation, or `"Globally suppressed."` for external suppressions |
+
+### Example
+
+```bash
+# Track both inline and external suppressions in a SARIF report
+gosec -track-suppressions -exclude=G101 -fmt=sarif -out=results.sarif ./...
+```
+
+In the resulting SARIF file, findings suppressed by `-exclude=G101` have `kind: external` and `justification: "Globally suppressed."`. Findings suppressed by `#nosec G204 -- reviewed by security team` have `kind: inSource` and `justification: "reviewed by security team"`.

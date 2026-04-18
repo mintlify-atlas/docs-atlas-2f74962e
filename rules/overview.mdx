@@ -1,0 +1,62 @@
+---
+title: "gosec security rules: all 50+ rules by category"
+description: "Browse all 50+ gosec security rules across 7 categories with CWE mappings, severity levels, and links to per-category reference pages."
+---
+
+gosec ships with over 50 rules organized into seven categories. Rules are identified by a `Gxxx` ID and each is mapped to a CWE (Common Weakness Enumeration) identifier. By default, all rules run against the scanned packages — use `-include` or `-exclude` flags to customize the active set.
+
+## Rule categories
+
+<CardGroup cols={2}>
+  <Card title="G1xx: General secure coding" icon="shield" href="/rules/g1xx-general">
+    Hardcoded credentials, HTTP hardening, cookie security, context propagation, and more.
+  </Card>
+  <Card title="G2xx: Injection patterns" icon="syringe" href="/rules/g2xx-injection">
+    SQL query construction, HTML template escaping, and command execution.
+  </Card>
+  <Card title="G3xx: Filesystem & permissions" icon="folder-open" href="/rules/g3xx-filesystem">
+    File and directory permissions, path traversal, temp files, and zip extraction.
+  </Card>
+  <Card title="G4xx: Crypto & TLS" icon="lock" href="/rules/g4xx-crypto">
+    Weak hash algorithms, bad TLS settings, insufficient RSA key length, hardcoded IVs.
+  </Card>
+  <Card title="G5xx: Import blocklist" icon="ban" href="/rules/g5xx-imports">
+    Forbidden crypto package imports: MD5, DES, RC4, SHA1, MD4, RIPEMD160.
+  </Card>
+  <Card title="G6xx: Runtime safety" icon="microchip" href="/rules/g6xx-runtime">
+    Range aliasing in Go ≤1.21 and slice bounds out of range.
+  </Card>
+  <Card title="G7xx: Taint analysis" icon="diagram-project" href="/rules/g7xx-taint">
+    Data-flow tracking for SQL injection, command injection, SSRF, XSS, path traversal, and more.
+  </Card>
+</CardGroup>
+
+## Implementation types
+
+gosec uses three analysis techniques:
+
+| Type | Description | Location |
+|------|-------------|----------|
+| **AST** | Pattern-based checks on Go syntax trees | `rules/` package |
+| **SSA** | Whole-program analysis using static single assignment form | `analyzers/` package |
+| **Taint** | Source-to-sink data flow tracking | `analyzers/` via taint framework |
+
+## Selecting rules
+
+```bash
+# Run only specific rules
+gosec -include=G101,G203,G401 ./...
+
+# Exclude a specific rule
+gosec -exclude=G303 ./...
+
+# Exclude rules for specific paths
+gosec --exclude-rules="cmd/.*:G204,G304" ./...
+```
+
+## Retired rules
+
+| Rule | Reason |
+|------|--------|
+| G105 | CVE fixed in Go standard library |
+| G307 (old) | Caused more inconvenience than fixing security issues; ID reused for file creation permissions |

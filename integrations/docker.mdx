@@ -1,0 +1,99 @@
+---
+title: "Running gosec with Docker"
+description: "Use the gosec Docker image from ghcr.io/securego/gosec to scan Go projects in containers, CI systems, or isolated environments without installing Go locally."
+---
+
+gosec is available as a Docker image on GitHub Container Registry. The image lets you run scans without installing Go or gosec locally, making it useful for containerized CI pipelines and isolated environments.
+
+<Warning>
+The gosec Docker image was migrated from Docker Hub to `ghcr.io/securego/gosec` starting with release v2.24.7. Docker Hub images are no longer published. Use the GHCR image for all new workflows.
+</Warning>
+
+## Pull the image
+
+```bash
+docker pull ghcr.io/securego/gosec:latest
+```
+
+To use a specific version:
+
+```bash
+docker pull ghcr.io/securego/gosec:2.25.0
+```
+
+## Scan a local project
+
+Mount your project directory and point gosec at the packages to scan:
+
+```bash
+docker run --rm -it \
+  -w /project \
+  -v $(pwd):/project \
+  ghcr.io/securego/gosec:latest /project/...
+```
+
+<Note>
+The `-w` flag sets the working directory inside the container to match the mounted project root. This is required for Go module dependency resolution to work correctly.
+</Note>
+
+## Pass gosec flags
+
+Any gosec flags can be appended after the image name:
+
+```bash
+# Write SARIF report
+docker run --rm -it \
+  -w /project \
+  -v $(pwd):/project \
+  ghcr.io/securego/gosec:latest \
+  -fmt sarif -out /project/results.sarif /project/...
+
+# Only scan for high severity issues
+docker run --rm -it \
+  -w /project \
+  -v $(pwd):/project \
+  ghcr.io/securego/gosec:latest \
+  -severity high /project/...
+```
+
+## Use in CI pipelines
+
+<Tabs>
+  <Tab title="GitLab CI">
+    ```yaml
+    gosec:
+      image: ghcr.io/securego/gosec:latest
+      script:
+        - gosec ./...
+    ```
+  </Tab>
+  <Tab title="CircleCI">
+    ```yaml
+    jobs:
+      gosec:
+        docker:
+          - image: ghcr.io/securego/gosec:latest
+        steps:
+          - checkout
+          - run: gosec ./...
+    ```
+  </Tab>
+</Tabs>
+
+## Available tags
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Most recent stable release |
+| `2.25.0` | Specific version (recommended for reproducible builds) |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="GitHub Actions" icon="github" href="/integrations/github-actions">
+    Use the official GitHub Action for GitHub CI pipelines.
+  </Card>
+  <Card title="Output formats" icon="file-export" href="/usage/output-formats">
+    Export results in SARIF, JSON, and other formats.
+  </Card>
+</CardGroup>

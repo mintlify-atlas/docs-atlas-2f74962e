@@ -1,0 +1,69 @@
+---
+title: "G2xx: Injection pattern rules"
+description: "gosec G2xx rules detect SQL query construction via format strings and concatenation, unescaped HTML template data, and audit of command execution."
+---
+
+The G2xx category covers injection risks that arise when user-controlled data is embedded into SQL queries, HTML templates, or operating system commands without proper sanitization. All four rules are AST-based and flag the syntactic patterns directly, complementing the deeper taint-flow analysis performed by the G7xx rules.
+
+## Rules summary
+
+| Rule | Description | Type |
+|------|-------------|------|
+| G201 | SQL query construction using format string | AST |
+| G202 | SQL query construction using string concatenation | AST |
+| G203 | Use of unescaped data in HTML templates | AST |
+| G204 | Audit use of command execution | AST |
+
+## Rule details
+
+<AccordionGroup>
+  <Accordion title="G201 — SQL query construction using format string">
+    Flags calls to `fmt.Sprintf` and similar formatting functions whose result is passed directly to a SQL query execution function (e.g. `db.Query`, `db.Exec`). Building queries this way is a classic SQL injection vector.
+
+    ```go
+    // Flagged
+    query := fmt.Sprintf("SELECT * FROM users WHERE id = %s", userID)
+    db.Query(query)
+
+    // Safe: use parameterized queries
+    db.Query("SELECT * FROM users WHERE id = ?", userID)
+    ```
+  </Accordion>
+
+  <Accordion title="G202 — SQL query construction using string concatenation">
+    Flags SQL query strings assembled with the `+` operator. Even when the concatenated value appears to be a constant, gosec flags the pattern to encourage the use of parameterized queries throughout.
+
+    ```go
+    // Flagged
+    query := "SELECT * FROM users WHERE name = '" + name + "'"
+    db.Query(query)
+
+    // Safe: use parameterized queries
+    db.Query("SELECT * FROM users WHERE name = ?", name)
+    ```
+  </Accordion>
+
+  <Accordion title="G203 — Use of unescaped data in HTML templates">
+    Flags use of `template.HTML`, `template.JS`, `template.URL`, and related types from `html/template` that bypass the package's automatic contextual escaping. Passing user input through these types can introduce XSS vulnerabilities.
+
+    ```go
+    // Flagged
+    tmpl.Execute(w, template.HTML(userInput))
+
+    // Safe: pass plain string and let html/template escape it
+    tmpl.Execute(w, userInput)
+    ```
+  </Accordion>
+
+  <Accordion title="G204 — Audit use of command execution">
+    Flags all calls to `exec.Command`, `exec.CommandContext`, and `syscall.Exec`. This is an audit rule — it reports every command execution site so that reviewers can verify that the command and its arguments are not influenced by untrusted input. For taint-tracked command injection, see G702.
+
+    ```go
+    // Flagged (audit)
+    cmd := exec.Command("ls", "-la", dir)
+    cmd.Run()
+    ```
+
+    Use `#nosec G204` on call sites that have been reviewed and verified safe.
+  </Accordion>
+</AccordionGroup>

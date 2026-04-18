@@ -1,0 +1,131 @@
+---
+title: "G3xx: Filesystem and permission rules"
+description: "gosec G3xx rules detect insecure file permissions, path traversal via taint, predictable temp file paths, and unsafe zip extraction."
+---
+
+The G3xx category addresses risks that arise when programs interact with the filesystem: overly permissive modes on files and directories, use of predictable temporary paths, extracting archive entries without validating their destination, and treating user-supplied paths as trusted. All rules are AST-based except where noted.
+
+## Rules summary
+
+| Rule | Description | Type | Configurable |
+|------|-------------|------|--------------|
+| G301 | Poor file permissions used when creating a directory | AST | Yes |
+| G302 | Poor file permissions used when creating file or using `chmod` | AST | Yes |
+| G303 | Creating tempfile using a predictable path | AST | No |
+| G304 | File path provided as taint input | AST | No |
+| G305 | File path traversal when extracting zip archive | AST | No |
+| G306 | Poor file permissions used when writing to a file | AST | Yes |
+| G307 | Poor file permissions used when creating a file with `os.Create` | AST | Yes |
+
+## Permission rule configuration
+
+G301, G302, G306, and G307 each accept a maximum-allowed permission mode as an octal string. Any file or directory created with permissions more permissive than the configured value will be flagged.
+
+```json
+{
+  "G301": "0o600",
+  "G302": "0o600",
+  "G306": "0o750",
+  "G307": "0o750"
+}
+```
+
+The values must be valid Go octal literals (prefix `0o` or bare octal digits). When no configuration is provided, gosec applies its built-in defaults.
+
+## Rule details
+
+<AccordionGroup>
+  <Accordion title="G301 — Poor file permissions when creating a directory">
+    Flags calls to `os.Mkdir` and `os.MkdirAll` where the permission mode is more permissive than the configured maximum (default: `0750`). Group-write and world-write bits on directories are common sources of privilege escalation.
+
+    ```go
+    // Flagged
+    os.Mkdir("/var/myapp/data", 0777)
+
+    // Safe
+    os.Mkdir("/var/myapp/data", 0750)
+    ```
+  </Accordion>
+
+  <Accordion title="G302 — Poor file permissions when creating file or using chmod">
+    Flags `os.OpenFile`, `os.Chmod`, and `syscall.Chmod` calls where the mode is more permissive than the configured maximum (default: `0600`). World-readable or world-writable files can expose sensitive data or allow tampering.
+
+    ```go
+    // Flagged
+    os.OpenFile("config.json", os.O_CREATE|os.O_WRONLY, 0644)
+
+    // Safe
+    os.OpenFile("config.json", os.O_CREATE|os.O_WRONLY, 0600)
+    ```
+  </Accordion>
+
+  <Accordion title="G303 — Creating tempfile using a predictable path">
+    Flags calls to `os.Create` or `ioutil.WriteFile` with a path that is constructed from a predictable prefix such as `/tmp/` combined with a fixed string. Predictable temp paths enable symlink attacks.
+
+    ```go
+    // Flagged
+    os.Create("/tmp/myapp-cache")
+
+    // Safe: use os.CreateTemp (Go 1.16+) for a random suffix
+    f, err := os.CreateTemp("", "myapp-cache-*")
+    ```
+  </Accordion>
+
+  <Accordion title="G304 — File path provided as taint input">
+    Flags `os.Open`, `os.OpenFile`, `ioutil.ReadFile`, and similar calls where the file path argument originates from an unvalidated source (function parameter, HTTP request, environment variable). An attacker who controls the path can read arbitrary files. For full taint tracking, also see G703.
+
+    ```go
+    // Flagged: filename comes from user input
+    func serveFile(w http.ResponseWriter, r *http.Request) {
+        name := r.URL.Query().Get("name")
+        http.ServeFile(w, r, name)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G305 — File path traversal when extracting zip archive">
+    Flags zip extraction code that constructs the output path by joining the archive's entry name directly onto a destination directory without first checking that the resolved path remains inside that directory. A malicious archive with entries containing `../` components can write files anywhere on the filesystem.
+
+    ```go
+    // Flagged
+    for _, f := range r.File {
+        path := filepath.Join(dest, f.Name) // f.Name may contain ../
+        os.MkdirAll(filepath.Dir(path), 0750)
+    }
+
+    // Safe: verify the path stays within dest
+    for _, f := range r.File {
+        path := filepath.Join(dest, f.Name)
+        if !strings.HasPrefix(filepath.Clean(path)+string(os.PathSeparator), dest+string(os.PathSeparator)) {
+            return fmt.Errorf("illegal path: %s", f.Name)
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G306 — Poor file permissions when writing to a file">
+    Flags `os.WriteFile` (and the deprecated `ioutil.WriteFile`) calls where the permission mode is more permissive than the configured maximum (default: `0600`).
+
+    ```go
+    // Flagged
+    os.WriteFile("secrets.txt", data, 0644)
+
+    // Safe
+    os.WriteFile("secrets.txt", data, 0600)
+    ```
+  </Accordion>
+
+  <Accordion title="G307 — Poor file permissions when creating a file with os.Create">
+    Flags `os.Create` calls. `os.Create` always creates files with mode `0666` (before umask), which may be too permissive for sensitive files. The configurable threshold (default: `0600`) determines what is considered acceptable after umask.
+
+    ```go
+    // Flagged
+    os.Create("report.txt")
+
+    // Safe alternative: use os.OpenFile with an explicit restrictive mode
+    os.OpenFile("report.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+    ```
+
+    Note: the G307 rule ID was previously used for deferred method error handling. That meaning is retired; G307 now refers exclusively to file creation permissions.
+  </Accordion>
+</AccordionGroup>

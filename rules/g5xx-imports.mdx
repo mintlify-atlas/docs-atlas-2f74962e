@@ -1,0 +1,62 @@
+---
+title: "G5xx: Blocked import rules"
+description: "gosec G5xx rules flag imports of cryptographically weak or deprecated packages including crypto/md5, crypto/des, crypto/rc4, and crypto/sha1."
+---
+
+The G5xx rules operate at the import declaration level. Rather than inspecting individual call sites, they flag any file that imports a package known to provide broken or deprecated cryptographic primitives. This provides an early, high-confidence signal that a file contains cryptographic code worth reviewing, complementing the call-site checks in the G4xx category.
+
+All G5xx rules are AST-based and have no configuration options.
+
+## Rules summary
+
+| Rule | Blocked package | Reason |
+|------|----------------|--------|
+| G501 | `crypto/md5` | MD5 is cryptographically broken |
+| G502 | `crypto/des` | DES/3DES are weak or vulnerable to Sweet32 |
+| G503 | `crypto/rc4` | RC4 has known biases; deprecated |
+| G504 | `net/http/cgi` | CGI is vulnerable to Shellshock-style attacks |
+| G505 | `crypto/sha1` | SHA1 is cryptographically broken |
+| G506 | `golang.org/x/crypto/md4` | MD4 is deprecated and broken |
+| G507 | `golang.org/x/crypto/ripemd160` | RIPEMD160 is deprecated |
+
+## Rule details
+
+<AccordionGroup>
+  <Accordion title="G501 — Import blocklist: crypto/md5">
+    Flags any import of the `crypto/md5` package. MD5 produces a 128-bit digest and is vulnerable to collision attacks. It must not be used for digital signatures, certificate fingerprints, or any security-sensitive purpose. Use `crypto/sha256` or `crypto/sha512` instead.
+  </Accordion>
+
+  <Accordion title="G502 — Import blocklist: crypto/des">
+    Flags any import of the `crypto/des` package. DES uses a 56-bit key and can be brute-forced in hours with modern hardware. Triple-DES (3DES) is slow and susceptible to the Sweet32 birthday attack when processing large amounts of data. Use `crypto/aes` instead.
+  </Accordion>
+
+  <Accordion title="G503 — Import blocklist: crypto/rc4">
+    Flags any import of the `crypto/rc4` package. RC4 has statistically biased output in its initial keystream bytes and has been prohibited in TLS by RFC 7465. Use AES-GCM or ChaCha20-Poly1305 instead.
+  </Accordion>
+
+  <Accordion title="G504 — Import blocklist: net/http/cgi">
+    Flags any import of `net/http/cgi`. CGI (Common Gateway Interface) programs inherit HTTP headers as environment variables, making them vulnerable to header-injection attacks in the style of Shellshock (CVE-2014-6271). New code should use long-lived server processes via `net/http` handlers rather than CGI.
+  </Accordion>
+
+  <Accordion title="G505 — Import blocklist: crypto/sha1">
+    Flags any import of the `crypto/sha1` package. SHA1 is no longer considered collision-resistant and has been deprecated for most uses by NIST. Use `crypto/sha256` or `crypto/sha512` instead. Note that SHA1 remains acceptable in some non-security contexts such as Git object IDs.
+  </Accordion>
+
+  <Accordion title="G506 — Import blocklist: golang.org/x/crypto/md4">
+    Flags any import of `golang.org/x/crypto/md4`. MD4 is an older hash function that was already considered weak before MD5, and is provided in the `x/crypto` module only for legacy protocol compatibility. It must not be used in new code.
+  </Accordion>
+
+  <Accordion title="G507 — Import blocklist: golang.org/x/crypto/ripemd160">
+    Flags any import of `golang.org/x/crypto/ripemd160`. RIPEMD-160 has been deprecated by its authors and by ENISA guidance. Use SHA-256 or SHA-512 for new designs.
+  </Accordion>
+</AccordionGroup>
+
+## Suppressing false positives
+
+If a blocked package is used for a legitimate non-security purpose (for example, computing Git-compatible SHA1 object IDs), suppress the finding on the import line:
+
+```go
+import (
+    "crypto/sha1" // #nosec G505 -- used only for Git object ID compatibility
+)
+```

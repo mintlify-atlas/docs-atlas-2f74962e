@@ -1,0 +1,99 @@
+---
+title: "Install gosec: go install, Docker, and GitHub Action"
+description: "Install gosec via go install, Docker, or the GitHub Action — no build tools required. Requires Go 1.25 or newer for local installation."
+---
+
+gosec can be installed as a local CLI binary, run as a Docker container, or used directly as a GitHub Action — no separate install required. Choose the method that fits your workflow.
+
+## go install (recommended)
+
+Installing via the Go toolchain is the simplest option and ensures you get the latest release. Requires Go 1.25 or newer.
+
+```bash
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+```
+
+After installation, verify it works:
+
+```bash
+gosec -version
+```
+
+<Note>
+`go install` places the binary in `$GOPATH/bin` (or `$HOME/go/bin` by default). Make sure this directory is in your `PATH`.
+</Note>
+
+## Install a specific version
+
+Pin to a specific release for reproducible builds:
+
+```bash
+go install github.com/securego/gosec/v2/cmd/gosec@v2.21.4
+```
+
+## Docker
+
+gosec is available as a Docker image hosted on GitHub Container Registry. The Docker Hub image is no longer published as of v2.24.7.
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/securego/gosec:latest
+
+# Scan a local project
+docker run --rm -it \
+  -w /project \
+  -v $(pwd):/project \
+  ghcr.io/securego/gosec:latest /project/...
+```
+
+<Warning>
+Set `-w` to the mounted project root so that Go module dependencies resolve correctly.
+</Warning>
+
+## GitHub Action
+
+Use gosec as a GitHub Action without any local installation. See the [GitHub Actions integration guide](/integrations/github-actions) for a complete workflow.
+
+```yaml
+- name: Run Gosec Security Scanner
+  uses: securego/gosec@master
+  with:
+    args: ./...
+```
+
+## Shell script
+
+For environments where you need to install gosec without the Go toolchain:
+
+```bash
+curl -sfL https://raw.githubusercontent.com/securego/gosec/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
+```
+
+## Verify installation
+
+After installing, confirm gosec is available:
+
+```bash
+gosec -version
+# Version: v2.x.x
+# Git tag: v2.x.x
+# Build date: ...
+```
+
+## Requirements
+
+| Requirement | Version |
+|-------------|---------|
+| Go | 1.25 or newer |
+| Operating system | Linux, macOS, Windows |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Scan your first project in under two minutes.
+  </Card>
+  <Card title="GitHub Actions" icon="github" href="/integrations/github-actions">
+    Add gosec to your CI/CD pipeline.
+  </Card>
+</CardGroup>

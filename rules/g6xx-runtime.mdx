@@ -1,0 +1,82 @@
+---
+title: "G6xx: Language and runtime safety rules"
+description: "gosec G6xx rules detect implicit memory aliasing in range statements (Go ≤1.21) and possible slice bounds out of range via SSA analysis."
+---
+
+The G6xx category addresses Go-specific correctness and safety issues. G601 detects a language-level footgun that was fixed in Go 1.22, while G602 uses SSA analysis to find code paths where a slice index access may panic at runtime. These rules complement the type-system and bounds-checking guarantees of the Go runtime with static detection at analysis time.
+
+## Rules summary
+
+| Rule | Description | Type | Go version |
+|------|-------------|------|------------|
+| G601 | Implicit memory aliasing in `RangeStmt` | AST | Go ≤1.21 only |
+| G602 | Possible slice bounds out of range | SSA | All versions |
+
+## Rule details
+
+<AccordionGroup>
+  <Accordion title="G601 — Implicit memory aliasing in range statements (Go ≤1.21)">
+    In Go 1.21 and earlier, the loop variable in a `for range` statement is a single variable that is reused on every iteration. Taking its address or storing a reference to it captures the same memory location for all iterations, so all captured references end up pointing to the final value of the loop variable after the loop completes.
+
+    This rule only applies when the project's `go.mod` specifies `go 1.21` or lower. It is automatically suppressed for Go 1.22+ projects, where each loop iteration gets its own variable.
+
+    ```go
+    // Flagged (Go ≤1.21): all pointers point to the same item
+    items := []string{"a", "b", "c"}
+    ptrs := make([]*string, len(items))
+    for i, v := range items {
+        ptrs[i] = &v // &v is always the address of the loop variable
+    }
+
+    // Safe (Go ≤1.21): capture a copy
+    for i, v := range items {
+        v := v          // create a new variable scoped to this iteration
+        ptrs[i] = &v
+    }
+
+    // Safe (Go 1.22+): loop variables are per-iteration automatically
+    for i, v := range items {
+        ptrs[i] = &v
+    }
+    ```
+
+    The same issue applies to goroutines launched inside range loops:
+
+    ```go
+    // Flagged (Go ≤1.21)
+    for _, item := range items {
+        go func() {
+            process(item) // item is the shared loop variable
+        }()
+    }
+
+    // Safe (Go ≤1.21): pass item as an argument
+    for _, item := range items {
+        go func(item string) {
+            process(item)
+        }(item)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G602 — Possible slice bounds out of range">
+    Uses SSA analysis to identify code paths where an index expression `s[i]` or slice expression `s[i:j]` may be evaluated with an index that exceeds the length of the slice. Unlike a simple bounds-check, this analysis tracks value ranges through control flow to find cases that the compiler's runtime bounds checks would catch only at runtime.
+
+    ```go
+    // Flagged: length not checked before access
+    func first(s []int) int {
+        return s[0] // panics if s is empty
+    }
+
+    // Safe: guard with a length check
+    func first(s []int) (int, bool) {
+        if len(s) == 0 {
+            return 0, false
+        }
+        return s[0], true
+    }
+    ```
+
+    This rule is particularly useful for catching off-by-one errors and missing nil/empty checks on slices returned from functions.
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,217 @@
+---
+title: "G7xx: Taint analysis rules"
+description: "gosec G7xx taint rules track untrusted data from HTTP requests and env vars to dangerous sinks, catching SQL injection, SSRF, XSS, command injection, and more."
+---
+
+The G7xx rules implement taint analysis — a form of interprocedural data-flow tracking that follows user-controlled values from their entry points (sources) through the program until they reach dangerous call sites (sinks), or until they pass through a sanitizing function (sanitizer) that makes them safe. Unlike the pattern-based G2xx and G3xx rules, taint analysis can trace values across function calls, variable assignments, and control flow branches, enabling detection of injection vulnerabilities that span multiple files or packages.
+
+## How taint analysis works
+
+Taint analysis in gosec is built on the SSA (Static Single Assignment) form of the program and proceeds in three stages:
+
+1. **Source identification** — values that originate from untrusted input are marked as tainted. Sources include HTTP request fields (`r.URL`, `r.Form`, `r.Body`), environment variables, command-line arguments, and database query results.
+2. **Propagation** — taint flows through assignments, function arguments, return values, and data structure fields. gosec tracks taint interprocedurally across the call graph.
+3. **Sink detection** — when a tainted value reaches a dangerous function (a sink), gosec reports an issue. If the value passes through a recognized sanitizer before reaching the sink, the taint is cleared and no issue is reported.
+
+## Rules summary
+
+| Rule | Vulnerability | Sink examples |
+|------|--------------|---------------|
+| G701 | SQL injection | `db.Query`, `db.Exec`, `db.QueryRow` |
+| G702 | Command injection | `exec.Command`, `exec.CommandContext` |
+| G703 | Path traversal | `os.Open`, `os.ReadFile`, `http.ServeFile` |
+| G704 | SSRF (Server-Side Request Forgery) | `http.Get`, `http.Post`, `http.NewRequest` |
+| G705 | XSS (Cross-Site Scripting) | `fmt.Fprintf` to `http.ResponseWriter`, `w.Write` |
+| G706 | Log injection | `log.Print`, `log.Fatal`, structured logging sinks |
+| G707 | SMTP command/header injection | `smtp.SendMail`, SMTP write functions |
+| G708 | Server-side template injection | `text/template` `Execute`, `ExecuteTemplate` |
+| G709 | Unsafe deserialization | `encoding/gob` `Decode`, `json.Unmarshal` with `interface{}` |
+
+## Rule details
+
+<AccordionGroup>
+  <Accordion title="G701 — SQL injection via taint analysis">
+    Tracks user-controlled input to SQL execution functions. This complements the syntactic checks in G201 (format string) and G202 (concatenation) by also catching injections that flow through intermediate variables, helper functions, or struct fields.
+
+    ```go
+    // Flagged: user input flows into db.Query
+    func getUser(db *sql.DB, r *http.Request) {
+        id := r.URL.Query().Get("id")
+        row := db.QueryRow("SELECT * FROM users WHERE id = " + id)
+        // ...
+    }
+
+    // Safe: parameterized query breaks the taint chain
+    func getUser(db *sql.DB, r *http.Request) {
+        id := r.URL.Query().Get("id")
+        row := db.QueryRow("SELECT * FROM users WHERE id = ?", id)
+        // ...
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G702 — Command injection via taint analysis">
+    Tracks user-controlled values to `exec.Command` and `exec.CommandContext`. This is the taint-analysis counterpart to the audit rule G204, and it only reports when a tainted value actually reaches the command or its arguments.
+
+    ```go
+    // Flagged: filename from request passed as shell argument
+    func convert(w http.ResponseWriter, r *http.Request) {
+        file := r.FormValue("file")
+        cmd := exec.Command("convert", file, "output.png")
+        cmd.Run()
+    }
+
+    // Safe: validate and allowlist the filename before use
+    func convert(w http.ResponseWriter, r *http.Request) {
+        file := r.FormValue("file")
+        if !isAllowedFilename(file) {
+            http.Error(w, "invalid file", http.StatusBadRequest)
+            return
+        }
+        cmd := exec.Command("convert", file, "output.png")
+        cmd.Run()
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G703 — Path traversal via taint analysis">
+    Tracks user-controlled values to filesystem access functions. This is the taint counterpart to the syntactic check G304 and catches traversal bugs that span multiple statements or functions.
+
+    ```go
+    // Flagged: path from URL query reaches os.Open
+    func downloadFile(w http.ResponseWriter, r *http.Request) {
+        name := r.URL.Query().Get("name")
+        f, err := os.Open(filepath.Join("/var/data", name))
+        // ...
+    }
+
+    // Safe: clean and validate the path
+    func downloadFile(w http.ResponseWriter, r *http.Request) {
+        name := filepath.Base(r.URL.Query().Get("name"))
+        f, err := os.Open(filepath.Join("/var/data", name))
+        // ...
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G704 — SSRF via taint analysis">
+    Tracks user-controlled values to HTTP client functions. A server that makes outbound requests to a URL supplied by the user can be abused to probe internal network services or cloud metadata endpoints.
+
+    ```go
+    // Flagged: URL from request body used in outbound http.Get
+    func proxy(w http.ResponseWriter, r *http.Request) {
+        target := r.FormValue("url")
+        resp, err := http.Get(target)
+        // ...
+    }
+
+    // Safe: validate that the target URL is in an allowlist
+    func proxy(w http.ResponseWriter, r *http.Request) {
+        target := r.FormValue("url")
+        if !isAllowedURL(target) {
+            http.Error(w, "forbidden", http.StatusForbidden)
+            return
+        }
+        resp, err := http.Get(target)
+        // ...
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G705 — XSS via taint analysis">
+    Tracks user-controlled values written to an HTTP response without HTML encoding. This catches reflected XSS bugs where tainted input flows to `fmt.Fprintf(w, ...)`, `w.Write(...)`, or similar response-writing calls, bypassing the automatic escaping that `html/template` would provide.
+
+    ```go
+    // Flagged: raw user input written to response
+    func greet(w http.ResponseWriter, r *http.Request) {
+        name := r.URL.Query().Get("name")
+        fmt.Fprintf(w, "<h1>Hello, %s</h1>", name)
+    }
+
+    // Safe: use html/template for automatic escaping
+    func greet(w http.ResponseWriter, r *http.Request) {
+        name := r.URL.Query().Get("name")
+        tmpl.Execute(w, name) // html/template escapes name
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G706 — Log injection via taint analysis">
+    Tracks user-controlled values written directly to log output. An attacker who can inject newlines or control characters into log entries can forge log records or disrupt log parsing pipelines.
+
+    ```go
+    // Flagged: raw input in log message
+    func handler(w http.ResponseWriter, r *http.Request) {
+        user := r.FormValue("user")
+        log.Printf("Login attempt by: %s", user)
+    }
+
+    // Safe: sanitize or encode the value before logging
+    func handler(w http.ResponseWriter, r *http.Request) {
+        user := sanitizeLogField(r.FormValue("user"))
+        log.Printf("Login attempt by: %s", user)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G707 — SMTP command/header injection via taint analysis">
+    Tracks user-controlled values to SMTP functions such as `smtp.SendMail`. Email headers (To, From, Subject) and the message body are injection points: without proper validation an attacker can add arbitrary headers or inject additional commands into the SMTP session.
+
+    ```go
+    // Flagged: subject from request passed to smtp.SendMail
+    func sendNotification(r *http.Request) {
+        subject := r.FormValue("subject")
+        msg := []byte("Subject: " + subject + "\r\n\r\nHello")
+        smtp.SendMail(addr, auth, from, to, msg)
+    }
+
+    // Safe: strip or encode CRLF sequences from header values
+    func sendNotification(r *http.Request) {
+        subject := sanitizeHeader(r.FormValue("subject"))
+        msg := []byte("Subject: " + subject + "\r\n\r\nHello")
+        smtp.SendMail(addr, auth, from, to, msg)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G708 — Server-side template injection via text/template">
+    Tracks user-controlled values passed as template source strings to `text/template`'s `Parse` or `New(...).Parse(...)` methods. Unlike `html/template`, `text/template` does not apply contextual escaping, and if an attacker can control the template string itself they can execute arbitrary template actions including reading files or calling arbitrary functions registered in the template's `FuncMap`.
+
+    ```go
+    // Flagged: user-supplied template string
+    func render(w http.ResponseWriter, r *http.Request) {
+        tmplStr := r.FormValue("template")
+        t, err := template.New("t").Parse(tmplStr) // text/template
+        t.Execute(w, data)
+    }
+
+    // Safe: use a fixed, developer-controlled template string
+    const tmplStr = `<p>Hello, {{.Name}}</p>`
+    var tmpl = template.Must(template.New("t").Parse(tmplStr))
+
+    func render(w http.ResponseWriter, r *http.Request) {
+        tmpl.Execute(w, data)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G709 — Unsafe deserialization of untrusted data">
+    Tracks user-controlled bytes passed to deserialization functions such as `encoding/gob`'s `Decode` or `json.Unmarshal` into an `interface{}` target. Deserializing untrusted data into generic or polymorphic types can trigger unexpected code execution paths or resource exhaustion depending on the decoder implementation.
+
+    ```go
+    // Flagged: network bytes decoded into interface{}
+    func handleMessage(conn net.Conn) {
+        var msg interface{}
+        dec := gob.NewDecoder(conn)
+        dec.Decode(&msg) // untrusted source decoded into interface{}
+    }
+
+    // Safe: decode into a concrete, well-typed struct
+    func handleMessage(conn net.Conn) {
+        var msg MyMessage
+        dec := gob.NewDecoder(conn)
+        dec.Decode(&msg)
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

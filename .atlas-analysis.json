@@ -1,24 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "gosec",
+  "projectType": "cli-tool",
+  "projectName": "gosec",
+  "projectDescription": "A static analysis tool that inspects Go source code for security vulnerabilities by scanning the AST and SSA representations.",
   "theme": "aspen",
-  "colors": {
-    "primary": "#33688c",
-    "light": "#5f768c",
-    "dark": "#adcdd0"
-  },
-  "favicon": "https://media.brand.dev/9e6bf0a7-6e65-4876-ba25-88d2075c36de.svg",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/securego/gosec"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/securego/gosec"
-    }
-  },
+  "primaryColor": "#33688c",
+  "lightColor": "#5f768c",
+  "darkColor": "#adcdd0",
   "navigation": {
     "tabs": [
       {
@@ -92,5 +79,34 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Pattern-based AST rules for detecting common security issues in Go code",
+    "SSA-based analyzers for type conversions, slice bounds, crypto, and context propagation",
+    "Taint analysis for tracking data flow from user input to dangerous sinks (SQL injection, command injection, path traversal, SSRF, XSS, log injection)",
+    "Multiple output formats: text, JSON, SARIF, YAML, CSV, JUnit XML, HTML, SonarQube, golint",
+    "GitHub Actions integration with SARIF upload support",
+    "AI-powered autofix suggestions via Gemini, Claude, or OpenAI",
+    "nosec annotation support for suppressing false positives",
+    "CWE mapping for every detected issue",
+    "Docker image available at ghcr.io/securego/gosec"
+  ],
+  "publicApiSurface": [
+    "gosec ./...",
+    "gosec -fmt=json -out=results.json ./...",
+    "gosec -fmt=sarif -out=results.sarif ./...",
+    "gosec -include=G101,G203,G401 ./...",
+    "gosec -exclude=G303 ./...",
+    "gosec -severity medium ./...",
+    "gosec -confidence medium ./...",
+    "gosec -tests ./...",
+    "gosec -exclude-generated ./...",
+    "gosec -conf config.json ./...",
+    "gosec -track-suppressions -fmt=sarif -out=results.sarif ./...",
+    "gosec -ai-api-provider=gemini-2.0-flash -ai-api-key=KEY ./...",
+    "gosec --exclude-rules='cmd/.*:G204,G304' ./...",
+    "gosec -nosec=true ./...",
+    "gosec -tags debug,ignore ./...",
+    "gosec -no-fail ./..."
+  ]
 }

@@ -1,0 +1,212 @@
+---
+title: "Path-based rule exclusions in gosec"
+description: "Suppress specific gosec rules for specific file paths using the --exclude-rules flag or config file, with regex path matching and wildcard rule support."
+---
+
+Large repositories often contain code with legitimately different security requirements — a CLI tool in `cmd/` that must execute subprocesses, or maintenance scripts that need broad filesystem access. Path-based rule exclusions let you suppress specific gosec rules for specific file paths without silencing the scanner globally or sprinkling `#nosec` annotations throughout the source.
+
+Exclusions can be defined on the command line with `--exclude-rules`, in the JSON config file under the `"exclude-rules"` key, or in both places at once. When both sources are present, **CLI rules are evaluated first and take precedence** over config file rules.
+
+---
+
+## The `--exclude-rules` CLI flag
+
+The flag accepts a semicolon-separated list of `path:rules` pairs. Each path is a regular expression matched against file paths, and each rules list is a comma-separated list of rule IDs.
+
+```
+--exclude-rules="<path-regex>:<rule1>,<rule2>;<path-regex2>:<rule3>"
+```
+
+<Steps>
+  <Step title="Exclude specific rules from a directory">
+    Suppress G204 and G304 for all files under `cmd/`:
+
+    ```bash
+    gosec --exclude-rules="cmd/.*:G204,G304" ./...
+    ```
+  </Step>
+
+  <Step title="Exclude all rules from a directory">
+    Use `*` as the rule list to suppress every rule for files matching the path:
+
+    ```bash
+    gosec --exclude-rules="scripts/.*:*" ./...
+    ```
+  </Step>
+
+  <Step title="Combine multiple exclusions">
+    Separate multiple path patterns with a semicolon:
+
+    ```bash
+    gosec --exclude-rules="cmd/.*:G204,G304;test/.*:G101" ./...
+    ```
+  </Step>
+</Steps>
+
+### Format reference
+
+| Component | Description |
+|-----------|-------------|
+| `path-regex` | Go regular expression matched against the file path of each finding |
+| `rule1,rule2` | Comma-separated gosec rule IDs (e.g. `G101`, `G304`) |
+| `*` | Wildcard: suppress all rules for the matching path |
+| `;` | Separator between multiple path-rule pairs |
+
+<Warning>
+  The path field is a **regular expression**, not a glob. Characters such as `.` must be escaped (`\.`) if you intend them as literals. `cmd/.*` matches any path containing `cmd/`, while `cmd/.+` requires at least one character after the slash.
+</Warning>
+
+---
+
+## The config file `exclude-rules` key
+
+The same exclusions can be expressed in the JSON config file as an array of objects. This is convenient for complex projects where the exclusion list would become unwieldy as a single CLI argument.
+
+```json
+{
+  "exclude-rules": [
+    {
+      "path": "cmd/.*",
+      "rules": ["G204", "G304"]
+    },
+    {
+      "path": "scripts/.*",
+      "rules": ["*"]
+    },
+    {
+      "path": "internal/testutil/.*",
+      "rules": ["G101", "G304"]
+    }
+  ]
+}
+```
+
+Each object in the array has exactly two fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | string | Regular expression matched against file paths. Cannot be empty. |
+| `rules` | array of strings | Rule IDs to suppress. Use `"*"` to suppress all rules. |
+
+Pass the config file to gosec alongside any CLI flags:
+
+```bash
+gosec -conf config.json ./...
+```
+
+---
+
+## Merging CLI and config file rules
+
+When `--exclude-rules` and a config file `exclude-rules` array are both provided, gosec **merges** them into a single ordered list. CLI rules appear first, which means that if a file path matches a CLI rule, that match is resolved before config file rules are consulted.
+
+```bash
+# CLI rule for cmd/ is checked before the config file rule for cmd/
+gosec -conf config.json --exclude-rules="cmd/.*:G402" ./...
+```
+
+<Note>
+  Merging is additive: a path can appear in both the CLI flag and the config file. Both sets of rules apply — they are not de-duplicated by path.
+</Note>
+
+---
+
+## Path matching behaviour
+
+The `path` value is compiled as a Go regular expression and matched against the normalized file path of each finding (backslashes replaced with forward slashes on Windows). A match anywhere in the path is sufficient; the expression does not need to be anchored.
+
+```json
+{
+  "exclude-rules": [
+    {
+      "path": "cmd/",
+      "rules": ["G204"]
+    }
+  ]
+}
+```
+
+The pattern `cmd/` matches `cmd/main.go`, `pkg/cmd/run.go`, and `internal/cmd/server.go`. To restrict matching to a specific prefix, anchor the pattern with `^`:
+
+```json
+{
+  "exclude-rules": [
+    {
+      "path": "^cmd/",
+      "rules": ["G204"]
+    }
+  ]
+}
+```
+
+---
+
+## Common patterns
+
+<AccordionGroup>
+  <Accordion title="CLI tools that run subprocesses (G204)">
+    CLI entry points routinely call `exec.Command`. Suppress G204 only in the `cmd/` directory tree:
+
+    ```json
+    {
+      "exclude-rules": [
+        {
+          "path": "cmd/.*",
+          "rules": ["G204"]
+        }
+      ]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Test helpers that use predictable paths (G101, G304)">
+    Test utilities often contain example secrets and open paths constructed from test fixtures. Suppress the relevant rules for test support packages without disabling them globally:
+
+    ```json
+    {
+      "exclude-rules": [
+        {
+          "path": "testutil/.*",
+          "rules": ["G101", "G304"]
+        }
+      ]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Maintenance scripts with broad filesystem access">
+    Scripts that manipulate the filesystem broadly can generate many findings from file-permission rules. Suppress all rules for the scripts directory:
+
+    ```json
+    {
+      "exclude-rules": [
+        {
+          "path": "scripts/.*",
+          "rules": ["*"]
+        }
+      ]
+    }
+    ```
+
+    Or using the CLI flag:
+
+    ```bash
+    gosec --exclude-rules="scripts/.*:*" ./...
+    ```
+  </Accordion>
+
+  <Accordion title="Generated code">
+    If you cannot use `-exclude-generated`, suppress specific noisy rules for generated file paths:
+
+    ```json
+    {
+      "exclude-rules": [
+        {
+          "path": "\\.pb\\.go$",
+          "rules": ["G104", "G115"]
+        }
+      ]
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,97 +1,85 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "gosec: Go Security Checker"
+description: "gosec scans Go source code for security vulnerabilities using AST and SSA analysis. Catch hardcoded credentials, injection risks, weak crypto, and more."
 ---
 
-## Setting up
+gosec is a static analysis tool for Go that inspects your source code for security vulnerabilities. It scans the Go AST and SSA representations to detect issues ranging from hardcoded credentials and SQL injection risks to weak cryptography and path traversal. With over 50 built-in rules, taint analysis, and support for multiple output formats including SARIF, gosec integrates seamlessly into local development, CI pipelines, and GitHub Actions.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install gosec via Go modules, Docker, or the GitHub Action.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Scan your first Go project and understand the results in minutes.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Rules Reference" icon="shield-halved" href="/rules/overview">
+    Browse all 50+ security rules across 7 categories with CWE mappings.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="GitHub Actions" icon="github" href="/integrations/github-actions">
+    Add gosec to your CI pipeline with SARIF upload for code scanning.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Why gosec?
 
-Everything you need to create world-class documentation.
+gosec catches security issues that typical linters miss — problems that lead to real vulnerabilities in production Go services.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="AST & SSA analysis" icon="magnifying-glass-chart">
+    Inspects both syntax trees and static single assignment form for deep, accurate analysis beyond simple pattern matching.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Taint analysis" icon="diagram-project">
+    Tracks untrusted data from HTTP requests and environment variables to dangerous sinks like SQL queries and shell commands.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="SARIF output" icon="file-code">
+    Produces SARIF reports that integrate with GitHub code scanning, SonarQube, and other security platforms.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="AI-powered fixes" icon="wand-magic-sparkles">
+    Get AI-generated remediation suggestions for detected issues using Gemini, Claude, or OpenAI.
   </Card>
-</Columns>
+</CardGroup>
 
-## Need inspiration?
+## Get started
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
+<Steps>
+  <Step title="Install gosec">
+    Install the latest version using Go modules:
+
+    ```bash
+    go install github.com/securego/gosec/v2/cmd/gosec@latest
+    ```
+  </Step>
+  <Step title="Scan your project">
+    Run gosec against all packages in your module:
+
+    ```bash
+    gosec ./...
+    ```
+  </Step>
+  <Step title="Review results">
+    gosec prints findings to stdout with severity, confidence, and CWE mapping. Exit code `1` means issues were found; `0` means clean.
+  </Step>
+  <Step title="Integrate with CI">
+    Add gosec to your GitHub Actions workflow and upload SARIF results to GitHub code scanning for persistent tracking.
+
+    See the [GitHub Actions integration guide](/integrations/github-actions) for a complete workflow example.
+  </Step>
+</Steps>
+
+## Rule categories
+
+gosec organizes its rules into seven categories covering the most common Go security issues:
+
+| Category | Rules | Description |
+|----------|-------|-------------|
+| G1xx | G101–G124 | General secure coding: hardcoded credentials, HTTP hardening, cookie security |
+| G2xx | G201–G204 | Injection: SQL construction, template escaping, command execution |
+| G3xx | G301–G307 | Filesystem: file permissions, path traversal, zip extraction |
+| G4xx | G401–G408 | Crypto & TLS: weak algorithms, bad TLS config, hardcoded IVs |
+| G5xx | G501–G507 | Import blocklist: dangerous crypto packages |
+| G6xx | G601–G602 | Runtime safety: range aliasing, slice bounds |
+| G7xx | G701–G709 | Taint analysis: SQL, command, path, SSRF, XSS, log, SMTP injection |
+
+<Card title="Browse all rules" icon="list" href="/rules/overview">
+  See the full rules list with descriptions, CWE mappings, and configuration options.
 </Card>

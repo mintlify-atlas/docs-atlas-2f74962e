@@ -1,0 +1,222 @@
+---
+title: "Adding security rules to gosec"
+description: "Learn how to implement new gosec rules as AST pattern checks, SSA whole-program analyzers, or taint source-to-sink data flow rules."
+---
+
+gosec supports three implementation styles for security rules, each suited to a different kind of analysis. AST rules perform node-level checks on the Go syntax tree, SSA analyzers reason about whole-program control and data flow, and taint analyzers track untrusted data from sources to dangerous sinks. Choose the style that fits the vulnerability you want to detect, then follow the steps below.
+
+## Implementation styles
+
+<Tabs>
+  <Tab title="AST rules">
+    AST rules implement the `gosec.Rule` interface and live in the `rules/` directory. They are the simplest option and work well for syntactic patterns — for example, detecting calls to specific functions or use of unsafe packages.
+  </Tab>
+  <Tab title="SSA analyzers">
+    SSA analyzers implement `analysis.Analyzer` from `golang.org/x/tools/go/analysis` and live in the `analyzers/` directory. They operate on the Static Single Assignment representation of a program, giving you whole-program context such as call graphs and type information.
+  </Tab>
+  <Tab title="Taint analyzers">
+    Taint analyzers are a specialized kind of SSA analyzer that track data flow from untrusted sources (for example, HTTP request fields) to dangerous sinks (for example, SQL query functions). They are configured with a `taint.Config` struct and constructed with `taint.NewGosecAnalyzer`.
+  </Tab>
+</Tabs>
+
+## Adding an AST rule
+
+Use `rules/unsafe.go` as a simple reference implementation when you start.
+
+<Steps>
+  <Step title="Create the rule file">
+    Add a new `.go` file in `rules/`. Implement a constructor function and a `Match` method containing your detection logic.
+  </Step>
+  <Step title="Register the rule">
+    Open `rules/rulelist.go` and add your rule to the registration list so gosec loads it at startup.
+  </Step>
+  <Step title="Add the CWE mapping">
+    Add the rule-to-CWE mapping in `issue/issue.go`. If the CWE does not already exist in the project, add its data to `cwe/data.go`.
+  </Step>
+  <Step title="Write tests and samples">
+    Add sample Go programs that trigger (and do not trigger) your rule in `testutils/`. Add the rule's test cases in `rules/` or as integration tests in `analyzer_test.go`.
+  </Step>
+</Steps>
+
+## Adding an SSA analyzer
+
+<Steps>
+  <Step title="Create the analyzer file">
+    Add a new `.go` file in `analyzers/`.
+  </Step>
+  <Step title="Define the analyzer and declare the dependency">
+    Construct an `*analysis.Analyzer` that requires `buildssa.Analyzer` so the SSA representation is available when your `Run` function executes.
+  </Step>
+  <Step title="Read the SSA result">
+    Call `ssautil.GetSSAResult(pass)` inside your `Run` function to obtain the SSA package for the program being analyzed.
+  </Step>
+  <Step title="Return findings">
+    Collect findings as `[]*issue.Issue` and return them from your `Run` function.
+  </Step>
+  <Step title="Register the analyzer">
+    Add your constructor to `analyzers/analyzerslist.go`.
+  </Step>
+  <Step title="Add the CWE mapping">
+    Add the rule-to-CWE mapping in `issue/issue.go`.
+  </Step>
+  <Step title="Write tests and sample code">
+    Add sample programs in `testutils/` and test cases in `analyzers/`.
+  </Step>
+</Steps>
+
+### SSA analyzer skeleton
+
+Use the following skeleton as a starting point for any new SSA analyzer:
+
+```go
+package analyzers
+
+import (
+	"fmt"
+
+	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/passes/buildssa"
+
+	"github.com/securego/gosec/v2/internal/ssautil"
+	"github.com/securego/gosec/v2/issue"
+)
+
+func newMyAnalyzer(id, description string) *analysis.Analyzer {
+	return &analysis.Analyzer{
+		Name:     id,
+		Doc:      description,
+		Run:      runMyAnalyzer,
+		Requires: []*analysis.Analyzer{buildssa.Analyzer},
+	}
+}
+
+func runMyAnalyzer(pass *analysis.Pass) (interface{}, error) {
+	ssaResult, err := ssautil.GetSSAResult(pass)
+	if err != nil {
+		return nil, fmt.Errorf("getting SSA result: %w", err)
+	}
+	_ = ssaResult
+
+	var issues []*issue.Issue
+	return issues, nil
+}
+```
+
+## Creating taint analysis rules
+
+gosec taint analyzers track data flow from untrusted sources to dangerous sinks. Existing taint rules cover SQL injection, command injection, path traversal, SSRF, XSS, log injection, and SMTP injection. Use these as reference implementations:
+
+- `analyzers/sqlinjection.go` (G701)
+- `analyzers/commandinjection.go` (G702)
+- `analyzers/pathtraversal.go` (G703)
+
+<Steps>
+  <Step title="Create the analyzer file">
+    Add a new file in `analyzers/` — for example `analyzers/newvuln.go`. Define a `taint.Config` with your sources, sinks, and optional sanitizers, then return `taint.NewGosecAnalyzer(...)` from your constructor:
+
+    ```go
+    package analyzers
+
+    import (
+    	"golang.org/x/tools/go/analysis"
+
+    	"github.com/securego/gosec/v2/taint"
+    )
+
+    func NewVulnerability() taint.Config {
+    	return taint.Config{
+    		Sources: []taint.Source{
+    			{Package: "net/http", Name: "Request", Pointer: true},
+    			{Package: "os", Name: "Args", IsFunc: true},
+    		},
+    		Sinks: []taint.Sink{
+    			{Package: "dangerous/package", Method: "DangerousFunc"},
+    		},
+    	}
+    }
+
+    func newNewVulnAnalyzer(id string, description string) *analysis.Analyzer {
+    	config := NewVulnerability()
+    	rule := NewVulnerabilityRule
+    	rule.ID = id
+    	rule.Description = description
+    	return taint.NewGosecAnalyzer(&rule, &config)
+    }
+    ```
+  </Step>
+  <Step title="Register the analyzer">
+    Add an entry to the `defaultAnalyzers` slice in `analyzers/analyzerslist.go`:
+
+    ```go
+    var defaultAnalyzers = []AnalyzerDefinition{
+    	// ... existing analyzers ...
+    	{"G7XX", "Description of vulnerability", newNewVulnAnalyzer},
+    }
+    ```
+  </Step>
+  <Step title="Add sample programs">
+    Create `testutils/g7xx_samples.go` with at least two positive cases (code that should be flagged) and two negative cases (safe code that must not be flagged).
+  </Step>
+  <Step title="Add the analyzer test">
+    Add a test case in `analyzers/analyzers_test.go`:
+
+    ```go
+    It("should detect your new vulnerability", func() {
+    	runner("G7XX", testutils.SampleCodeG7XX)
+    })
+    ```
+  </Step>
+</Steps>
+
+## Taint configuration reference
+
+### Sources
+
+Sources define where untrusted data enters the program.
+
+| Field     | Type   | Description                                                              |
+| --------- | ------ | ------------------------------------------------------------------------ |
+| `Package` | string | Import path of the package, for example `"net/http"`.                    |
+| `Name`    | string | Type or function name, for example `"Request"` or `"Getenv"`.            |
+| `Pointer` | bool   | Set `true` for pointer types such as `*http.Request`.                    |
+| `IsFunc`  | bool   | Set `true` when the source is a function that returns tainted data.      |
+
+### Sinks
+
+Sinks define where tainted data must not reach.
+
+| Field       | Type    | Description                                                                            |
+| ----------- | ------- | -------------------------------------------------------------------------------------- |
+| `Package`   | string  | Import path of the package.                                                            |
+| `Receiver`  | string  | Method receiver type name; leave empty for package-level functions.                    |
+| `Method`    | string  | Function or method name.                                                               |
+| `Pointer`   | bool    | Whether the receiver is a pointer type.                                                |
+| `CheckArgs` | []int   | Optional argument indexes to inspect. If omitted, all arguments are checked.           |
+
+```go
+// For *sql.DB.Query, Args[1] is the query string.
+{Package: "database/sql", Receiver: "DB", Method: "Query", Pointer: true, CheckArgs: []int{1}}
+
+// Skip writer arg in fmt.Fprintf and check the rest.
+{Package: "fmt", Method: "Fprintf", CheckArgs: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}}
+```
+
+### Sanitizers
+
+Sanitizers break the taint flow after validation or escaping. If tainted data passes through a configured sanitizer, it is treated as safe for all subsequent sinks.
+
+| Field      | Type   | Description                                         |
+| ---------- | ------ | --------------------------------------------------- |
+| `Package`  | string | Import path of the package.                         |
+| `Receiver` | string | Receiver type name; empty for package-level functions. |
+| `Method`   | string | Function or method name.                            |
+| `Pointer`  | bool   | Whether the receiver is a pointer type.             |
+
+## Common taint sources
+
+| Source type           | Package    | Type / Method | Pointer | IsFunc |
+| --------------------- | ---------- | ------------- | ------- | ------ |
+| HTTP request          | `net/http` | `Request`     | `true`  | `false` |
+| Command-line args     | `os`       | `Args`        | `false` | `true`  |
+| Environment variables | `os`       | `Getenv`      | `false` | `true`  |
+| File content          | `bufio`    | `Reader`      | `true`  | `false` |

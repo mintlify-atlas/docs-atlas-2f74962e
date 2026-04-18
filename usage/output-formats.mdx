@@ -1,0 +1,199 @@
+---
+title: "gosec output formats and report files"
+description: "Export gosec results as text, JSON, SARIF, YAML, CSV, JUnit XML, HTML, SonarQube, or golint. Control file and stdout output independently."
+---
+
+gosec can report findings in a range of formats suited to terminals, CI dashboards, code scanning platforms, and custom tooling. By default, results are printed to stdout as human-readable text. Use the flags below to change the format, write to a file, or do both at the same time.
+
+## Choosing a format
+
+The `-fmt` flag controls the output format. All format names are lowercase.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-fmt` | `text` | Output format: `text`, `json`, `yaml`, `csv`, `junit-xml`, `html`, `sonarqube`, `golint`, or `sarif` |
+
+```bash
+# Default text output to stdout
+gosec ./...
+
+# JSON output to stdout
+gosec -fmt json ./...
+
+# SARIF output to a file
+gosec -fmt sarif -out results.sarif ./...
+```
+
+## Writing to a file
+
+Use `-out` to write the report to a file instead of stdout. When `-out` is set, output is sent only to the file unless you also pass `-stdout`.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-out` | _(none)_ | Path to the output file for results |
+
+```bash
+gosec -fmt json -out results.json ./...
+```
+
+## Printing to stdout and writing to a file simultaneously
+
+Use `-stdout` to print results to stdout in addition to writing the `-out` file. Both outputs use the same format by default.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-stdout` | `false` | Print results to stdout as well as write the output file |
+
+```bash
+# Write JSON to file and also print JSON to stdout
+gosec -fmt json -out results.json -stdout ./...
+```
+
+## Overriding the stdout format
+
+When `-stdout` is set, `-verbose` lets you use a different format for stdout while keeping the original format in the file. This is useful when you want a machine-readable file but human-readable terminal output.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-verbose` | _(none)_ | Override the stdout format when `-stdout` is used. Accepts the same values as `-fmt` |
+
+```bash
+# Write JSON to file, print text to terminal
+gosec -fmt json -out results.json -stdout -verbose text ./...
+```
+
+## Colorized text output
+
+When printing text format to stdout, gosec colorizes the output by default.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-color` | `true` | Colorize text-format output when printing to stdout |
+
+```bash
+# Disable color (useful for log files or non-ANSI terminals)
+gosec -color=false ./...
+```
+
+<Note>
+Color is only applied to the `text` format. Other formats are unaffected by `-color`.
+</Note>
+
+## Format reference
+
+<Tabs>
+  <Tab title="text">
+    Human-readable output suitable for terminals. Includes file path, line number, rule ID, severity, confidence, and the offending code snippet.
+
+    ```bash
+    gosec ./...
+    ```
+  </Tab>
+  <Tab title="json">
+    Structured JSON report. Compatible with custom tooling and CI parsers.
+
+    ```bash
+    gosec -fmt json -out results.json ./...
+    ```
+  </Tab>
+  <Tab title="sarif">
+    Static Analysis Results Interchange Format (SARIF). Required for GitHub code scanning integration.
+
+    ```bash
+    gosec -fmt sarif -out results.sarif ./...
+    ```
+  </Tab>
+  <Tab title="yaml">
+    YAML-formatted report.
+
+    ```bash
+    gosec -fmt yaml -out results.yaml ./...
+    ```
+  </Tab>
+  <Tab title="csv">
+    Comma-separated values. Suitable for spreadsheet import.
+
+    ```bash
+    gosec -fmt csv -out results.csv ./...
+    ```
+  </Tab>
+  <Tab title="junit-xml">
+    JUnit XML report. Compatible with CI systems that consume JUnit test results (Jenkins, CircleCI, etc.).
+
+    ```bash
+    gosec -fmt junit-xml -out results.xml ./...
+    ```
+  </Tab>
+  <Tab title="html">
+    Self-contained HTML report for browser viewing.
+
+    ```bash
+    gosec -fmt html -out results.html ./...
+    ```
+  </Tab>
+  <Tab title="sonarqube">
+    SonarQube generic issue import format.
+
+    ```bash
+    gosec -fmt sonarqube -out gosec-report.json ./...
+    ```
+  </Tab>
+  <Tab title="golint">
+    golint-compatible format. Useful for tools that consume golint output.
+
+    ```bash
+    gosec -fmt golint ./...
+    ```
+  </Tab>
+</Tabs>
+
+## GitHub code scanning (SARIF)
+
+gosec integrates with [GitHub code scanning](https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning) via SARIF. Use `-no-fail` so the workflow step does not fail before the SARIF file is uploaded.
+
+```yaml
+- name: Run Gosec Security Scanner
+  uses: securego/gosec@master
+  with:
+    args: '-no-fail -fmt sarif -out results.sarif ./...'
+
+- name: Upload SARIF file
+  uses: github/codeql-action/upload-sarif@v2
+  with:
+    sarif_file: results.sarif
+```
+
+## SonarQube integration
+
+gosec generates the [generic issue import format](https://docs.sonarqube.org/latest/analysis/generic-issue/) for SonarQube. After generating the report, import it using the `sonar.externalIssuesReportPaths` property in your SonarQube scanner configuration.
+
+```bash
+gosec -fmt sonarqube -out gosec-report.json ./...
+```
+
+Then in your SonarQube scanner properties:
+
+```
+sonar.externalIssuesReportPaths=gosec-report.json
+```
+
+## Tracking suppressions
+
+The `-track-suppressions` flag includes suppression metadata in the report, which is useful for auditing `#nosec` annotations and externally excluded rules.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-track-suppressions` | `false` | Include suppression kind and justification in the output |
+
+<Warning>
+Suppression tracking is only supported by the `sarif` and `json` formats. Using it with other formats has no effect.
+</Warning>
+
+```bash
+gosec -track-suppressions -exclude=G101 -fmt sarif -out results.sarif ./...
+```
+
+Each suppressed finding includes:
+
+- **kind**: `external` (excluded via `-include`/`-exclude`) or `inSource` (suppressed via `#nosec` annotation)
+- **justification**: `"Globally suppressed."` for external suppressions, or the text after `--` in the `#nosec` comment for inline suppressions

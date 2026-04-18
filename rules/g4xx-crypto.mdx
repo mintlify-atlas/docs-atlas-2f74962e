@@ -1,0 +1,126 @@
+---
+title: "G4xx: Cryptography and TLS rules"
+description: "gosec G4xx rules detect weak hash algorithms, bad TLS configuration, short RSA keys, insecure random sources, hardcoded IVs, and SSH callback misuse."
+---
+
+The G4xx category covers cryptographic and protocol-level security issues. These rules flag the use of broken or weak algorithms, insecure default configurations in TLS, non-cryptographic random number sources where security is required, and subtle implementation mistakes such as hardcoded initialization vectors or stateful SSH authentication callbacks.
+
+## Rules summary
+
+| Rule | Description | Type |
+|------|-------------|------|
+| G401 | Detect the usage of MD5 or SHA1 | AST |
+| G402 | Look for bad TLS connection settings | AST |
+| G403 | Ensure minimum RSA key length of 2048 bits | AST |
+| G404 | Insecure random number source (`rand`) | AST |
+| G405 | Detect the usage of DES or RC4 | AST |
+| G406 | Detect the usage of deprecated MD4 or RIPEMD160 | AST |
+| G407 | Use of hardcoded IV/nonce for encryption | SSA |
+| G408 | Stateful misuse of `ssh.PublicKeyCallback` leading to auth bypass | SSA |
+
+## Rule details
+
+<AccordionGroup>
+  <Accordion title="G401 — Usage of MD5 or SHA1">
+    Flags direct calls to `md5.New()`, `md5.Sum()`, `sha1.New()`, and `sha1.Sum()` from the standard library. MD5 and SHA1 are cryptographically broken and must not be used for security-sensitive operations such as password hashing, digital signatures, or message authentication. For the corresponding import-level check, see G501 and G505.
+
+    ```go
+    // Flagged
+    hash := md5.Sum(data)
+    hash := sha1.New()
+
+    // Safe alternatives
+    hash := sha256.Sum256(data)
+    hash := sha512.New()
+    ```
+  </Accordion>
+
+  <Accordion title="G402 — Bad TLS connection settings">
+    Flags `tls.Config` literals or assignments that set insecure options, including:
+
+    - `InsecureSkipVerify: true` — disables certificate verification entirely
+    - `MinVersion` set below `tls.VersionTLS12`
+    - `MaxVersion` set to an old protocol version
+    - Inclusion of weak cipher suites
+
+    ```go
+    // Flagged
+    cfg := &tls.Config{
+        InsecureSkipVerify: true,
+    }
+
+    // Flagged
+    cfg := &tls.Config{
+        MinVersion: tls.VersionTLS10,
+    }
+
+    // Safe
+    cfg := &tls.Config{
+        MinVersion: tls.VersionTLS12,
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="G403 — Insufficient RSA key length">
+    Flags calls to `rsa.GenerateKey` where the requested bit length is less than 2048. Keys shorter than 2048 bits are considered too weak for current security requirements.
+
+    ```go
+    // Flagged
+    key, err := rsa.GenerateKey(rand.Reader, 1024)
+
+    // Safe
+    key, err := rsa.GenerateKey(rand.Reader, 2048)
+    ```
+  </Accordion>
+
+  <Accordion title="G404 — Insecure random number source">
+    Flags use of `math/rand` functions (`rand.New`, `rand.Seed`, `rand.Int`, etc.) in contexts where a cryptographically secure random source is required. `math/rand` is deterministic and predictable; use `crypto/rand` instead for security-sensitive randomness.
+
+    ```go
+    // Flagged
+    n := rand.Intn(100) // math/rand
+
+    // Safe
+    b := make([]byte, 8)
+    crypto_rand.Read(b) // crypto/rand
+    ```
+  </Accordion>
+
+  <Accordion title="G405 — Usage of DES or RC4">
+    Flags calls to `des.NewCipher`, `des.NewTripleDESCipher`, `rc4.NewCipher`, and related functions. DES has a 56-bit key and is trivially brute-forced; Triple-DES is slow and vulnerable to Sweet32. RC4 has known biases and is deprecated. For the import-level equivalents, see G502 and G503.
+
+    ```go
+    // Flagged
+    block, err := des.NewCipher(key)
+    cipher, err := rc4.NewCipher(key)
+
+    // Safe alternative
+    block, err := aes.NewCipher(key)
+    ```
+  </Accordion>
+
+  <Accordion title="G406 — Usage of deprecated MD4 or RIPEMD160">
+    Flags calls to `golang.org/x/crypto/md4` and `golang.org/x/crypto/ripemd160`. Both algorithms are deprecated by their respective standards bodies and should not be used in new code. For the import-level equivalents, see G506 and G507.
+  </Accordion>
+
+  <Accordion title="G407 — Hardcoded IV/nonce for encryption">
+    Uses SSA analysis to detect cases where the initialization vector or nonce passed to a cipher mode (e.g. `cipher.NewCBCEncrypter`, `cipher.NewGCM`) is a fixed, hardcoded byte slice rather than a randomly generated value. Reusing an IV with the same key completely breaks the security of most cipher modes.
+
+    ```go
+    // Flagged
+    iv := []byte("0000000000000000") // hardcoded
+    mode := cipher.NewCBCEncrypter(block, iv)
+
+    // Safe
+    iv := make([]byte, aes.BlockSize)
+    io.ReadFull(rand.Reader, iv)
+    mode := cipher.NewCBCEncrypter(block, iv)
+    ```
+  </Accordion>
+
+  <Accordion title="G408 — Stateful misuse of ssh.PublicKeyCallback">
+    Uses SSA analysis to detect a subtle authentication bypass in Go's `crypto/ssh` package. When `ServerConfig.PublicKeyCallback` is set without also setting `ServerConfig.PasswordCallback` or returning the authenticated key from the callback, a stateful multi-step handshake can allow an attacker to authenticate with a different key than the one they proved possession of.
+
+    The fix is to use the `ssh.CertChecker` helper or to compare the key returned by the callback with the key used in the final authentication message.
+  </Accordion>
+</AccordionGroup>

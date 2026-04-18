@@ -1,0 +1,130 @@
+---
+title: "AI-powered fix suggestions for gosec findings"
+description: "Use gosec's AI autofix feature to get remediation suggestions from Gemini, Claude, or OpenAI for each detected security issue in your Go code."
+---
+
+gosec can call an AI API to generate fix suggestions for each finding it detects. When enabled, gosec sends each unique issue description to the configured model and attaches the response to the finding in the report. This feature works with Google Gemini, Anthropic Claude, OpenAI, and any OpenAI-compatible endpoint such as Azure OpenAI, LocalAI, or Ollama.
+
+## Enabling AI autofix
+
+AI autofix is off by default. Enable it by passing `-ai-api-provider` with a supported model name. If you omit `-ai-api-key`, gosec reads the key from the `GOSEC_AI_API_KEY` environment variable.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-ai-api-provider` | _(none)_ | Model name that selects the AI provider and model |
+| `-ai-api-key` | _(none)_ | API key for the selected provider |
+| `-ai-base-url` | _(none)_ | Custom base URL for OpenAI-compatible endpoints |
+| `-ai-skip-ssl` | `false` | Skip SSL certificate verification for the AI API request |
+
+The `GOSEC_AI_API_KEY` environment variable takes precedence over `-ai-api-key` when both are set.
+
+## Supported providers and models
+
+<Tabs>
+  <Tab title="Gemini">
+    Pass any of the following model names to `-ai-api-provider`. The provider is selected automatically based on the `gemini-` prefix.
+
+    | Model name | Notes |
+    |------------|-------|
+    | `gemini-2.5-pro` | |
+    | `gemini-2.5-flash` | |
+    | `gemini-2.5-flash-lite` | |
+    | `gemini-2.0-flash` | |
+    | `gemini-2.0-flash-lite` | Default when using `gemini` alias |
+
+    Get a Gemini API key from [Google AI Studio](https://ai.google.dev/gemini-api/docs/api-key).
+
+    ```bash
+    gosec -ai-api-provider="gemini-2.0-flash" -ai-api-key="your_key" ./...
+    ```
+
+    You can also export the key as an environment variable:
+
+    ```bash
+    export GOSEC_AI_API_KEY="your_key"
+    gosec -ai-api-provider="gemini-2.5-flash" ./...
+    ```
+  </Tab>
+  <Tab title="Claude">
+    Pass any of the following model names to `-ai-api-provider`. The provider is selected automatically based on the `claude-` prefix.
+
+    | Model name | Notes |
+    |------------|-------|
+    | `claude-sonnet-4-0` | Default when prefix matches `claude` |
+    | `claude-sonnet-4-5` | |
+    | `claude-sonnet-4-6` | |
+    | `claude-haiku-4-5` | |
+    | `claude-opus-4-0` | |
+    | `claude-opus-4-1` | |
+    | `claude-opus-4-6` | |
+
+    Get a Claude API key from the [Anthropic Console](https://console.anthropic.com/).
+
+    ```bash
+    gosec -ai-api-provider="claude-sonnet-4-0" -ai-api-key="your_key" ./...
+    ```
+  </Tab>
+  <Tab title="OpenAI">
+    Pass any of the following model names to `-ai-api-provider`. The provider is selected automatically based on the `gpt-` prefix.
+
+    | Model name | Notes |
+    |------------|-------|
+    | `gpt-4o` | Default OpenAI model |
+    | `gpt-4o-mini` | Lighter, faster variant |
+
+    Get an OpenAI API key from [OpenAI Platform](https://platform.openai.com/api-keys).
+
+    ```bash
+    gosec -ai-api-provider="gpt-4o" -ai-api-key="your_key" ./...
+    ```
+  </Tab>
+</Tabs>
+
+## Custom OpenAI-compatible endpoints
+
+The `-ai-base-url` flag points gosec at any OpenAI-compatible API endpoint. Use it with `-ai-api-provider` set to the model name the endpoint expects. Models whose names do not start with `gemini-` or `claude-` are automatically routed through the OpenAI-compatible client.
+
+### Azure OpenAI
+
+```bash
+gosec -ai-api-provider="gpt-4o" \
+  -ai-api-key="your_azure_key" \
+  -ai-base-url="https://your-resource.openai.azure.com/openai/deployments/your-deployment" \
+  ./...
+```
+
+### Ollama (local)
+
+Ollama does not require an API key. Pass any model name Ollama has loaded.
+
+```bash
+gosec -ai-api-provider="llama3.2" \
+  -ai-base-url="http://localhost:11434/v1" \
+  ./...
+```
+
+### Custom internal endpoint with self-signed certificate
+
+Use `-ai-skip-ssl` when the endpoint uses a self-signed TLS certificate.
+
+```bash
+gosec -ai-api-provider="custom-model" \
+  -ai-api-key="your_key" \
+  -ai-base-url="https://internal-api.company.com/v1" \
+  -ai-skip-ssl \
+  ./...
+```
+
+<Warning>
+`-ai-skip-ssl` disables TLS certificate verification. Only use it with endpoints you control or fully trust.
+</Warning>
+
+## How autofix suggestions are generated
+
+When `-ai-api-provider` is set and gosec finds at least one issue, it sends a prompt for each unique issue description to the configured model. The prompt asks the model for a brief explanation and a Go code fix, formatted in Markdown and limited to approximately 200 words. Identical issue descriptions share the same cached response, so each distinct finding type is queried only once per run.
+
+The suggestion is attached to the finding and included in report formats that support it.
+
+<Tip>
+Autofix suggestions are advisory. Always review and test any AI-generated code changes before applying them to your codebase.
+</Tip>

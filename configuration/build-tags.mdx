@@ -1,0 +1,164 @@
+---
+title: "Build tags and Go version configuration"
+description: "Pass Go build tags to gosec with -tags, override Go version detection via GOSECGOVERSION, and configure private module access with GOPRIVATE."
+---
+
+gosec integrates with the standard Go toolchain to load packages and resolve dependencies. This means it respects Go build tags, reads the module graph, and — by default — queries the Go toolchain to determine the Go version in use. This page explains how to control each of these inputs.
+
+---
+
+## Build tags
+
+Go build tags (also called build constraints) tell the compiler which files to include in a build. gosec passes your specified tags directly to the Go analyzer so that it sees the same view of the source as a regular build would.
+
+Provide tags as a comma-separated list with the `-tags` flag:
+
+```bash
+gosec -tags debug,ignore ./...
+```
+
+Multiple tags are separated by commas with no spaces. The tags are forwarded verbatim to the underlying `go/packages` loader, so any valid Go build tag expression is accepted.
+
+<Tip>
+  If your project uses build tags to gate platform-specific code, run gosec separately for each relevant tag combination to ensure full coverage.
+</Tip>
+
+### Example: scanning with a custom tag
+
+```bash
+# Scan with the "integration" tag active
+gosec -tags integration ./...
+
+# Scan with multiple tags
+gosec -tags "linux,amd64" ./...
+```
+
+---
+
+## Go version detection
+
+Some gosec rules are sensitive to the Go version in use. For example, G601 (implicit memory aliasing in range statements) only applies to Go 1.21 and lower, because the Go team changed the semantics of loop variable scoping in Go 1.22.
+
+By default, gosec determines the Go version by running `go list` to parse the `go` directive in `go.mod`. This is accurate but adds a subprocess invocation to every scan, which can be noticeable in large repositories or slow CI environments.
+
+### GOSECGOVERSION environment variable
+
+Set `GOSECGOVERSION` to skip the `go list` call and specify the Go version directly:
+
+```bash
+GOSECGOVERSION=go1.21.1 gosec ./...
+```
+
+The value must match the format used in `go.mod`: the word `go` followed by the full version string.
+
+<Tabs>
+  <Tab title="Shell export">
+    ```bash
+    export GOSECGOVERSION=go1.21.1
+    gosec ./...
+    ```
+  </Tab>
+  <Tab title="Inline">
+    ```bash
+    GOSECGOVERSION=go1.21.1 gosec ./...
+    ```
+  </Tab>
+  <Tab title="GitHub Actions">
+    ```yaml
+    - name: Run Gosec Security Scanner
+      uses: securego/gosec@master
+      env:
+        GOSECGOVERSION: go1.21.1
+      with:
+        args: ./...
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  If `GOSECGOVERSION` is not set and `go list` cannot determine the version from `go.mod`, gosec falls back to the Go runtime version of the binary itself.
+</Note>
+
+### Version-sensitive rules
+
+| Rule | Condition |
+|------|-----------|
+| G601 | Reported only for Go 1.21 or lower. The implicit memory aliasing issue was resolved by the Go 1.22 loop variable change. |
+
+---
+
+## Dependency management
+
+gosec loads packages through Go modules. In most projects, the module graph is already resolved and gosec can scan immediately after checkout.
+
+If gosec reports errors about missing or unresolvable packages, ensure dependencies are fully downloaded before scanning:
+
+```bash
+go mod tidy
+go mod download
+gosec ./...
+```
+
+<Steps>
+  <Step title="Tidy the module graph">
+    `go mod tidy` removes unused dependencies and adds any that are missing from `go.sum`:
+
+    ```bash
+    go mod tidy
+    ```
+  </Step>
+  <Step title="Download all dependencies">
+    `go mod download` fetches all module archives to the local cache so gosec can load them without network access:
+
+    ```bash
+    go mod download
+    ```
+  </Step>
+  <Step title="Run gosec">
+    ```bash
+    gosec ./...
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Private modules
+
+If your project imports private Go modules, gosec needs authenticated access to fetch them. Configure the following environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `GOPRIVATE` | Comma-separated list of module path prefixes to treat as private (e.g. `github.com/your-org/*`). Go will bypass the public module proxy and checksum database for these paths. |
+| `GITHUB_AUTHENTICATION_TOKEN` | A GitHub personal access token with read access to the private repositories. |
+
+### GitHub Actions example
+
+```yaml
+name: Run Gosec
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    env:
+      GO111MODULE: on
+      GOPRIVATE: github.com/your-org/*
+      GITHUB_AUTHENTICATION_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v3
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: ./...
+```
+
+<Warning>
+  Never commit `GITHUB_AUTHENTICATION_TOKEN` or any other credentials directly to your repository. Always pass them through secrets or environment variables injected at runtime.
+</Warning>

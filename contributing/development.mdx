@@ -1,0 +1,152 @@
+---
+title: "gosec development workflow"
+description: "Set up a local gosec development environment, run tests and linters, use rule debugging utilities, and understand the release process."
+---
+
+This page covers everything you need to build gosec locally, run the full test suite and linter, use the available debugging utilities when writing or troubleshooting rules, guard against performance regressions, regenerate generated data files, and cut a release.
+
+## Prerequisites
+
+gosec requires **Go 1.25 or later**. See `go.mod` for the exact minimum version in use by the current codebase.
+
+## Local workflow
+
+| Task | Command |
+| ---- | ------- |
+| Build the binary | `make` |
+| Run all CI checks (format, vet, security scan, vulnerability scan, tests) | `make test` |
+| Run the linter only | `make golangci` |
+
+## Rule development utilities
+
+Two tools are available while building or debugging rules.
+
+### ssadump
+
+`ssadump` prints the SSA representation of a Go program, which is useful for understanding what the SSA pass sees before writing an SSA analyzer.
+
+```bash
+ssadump -build F main.go
+```
+
+Install it with:
+
+```bash
+go install golang.org/x/tools/cmd/ssadump@latest
+```
+
+### gosecutil
+
+`gosecutil` inspects the AST, type information, definitions, and imports of a Go source file.
+
+```bash
+gosecutil -tool ast main.go
+```
+
+Valid `-tool` values:
+
+| Value      | What it shows                        |
+| ---------- | ------------------------------------ |
+| `ast`      | Full AST node tree                   |
+| `callobj`  | Call object relationships            |
+| `uses`     | Identifier use sites                 |
+| `types`    | Type information for each identifier |
+| `defs`     | Identifier definitions               |
+| `comments` | Comment groups                       |
+| `imports`  | Import declarations                  |
+
+## Performance regression guard
+
+CI enforces a taint performance budget using the `BenchmarkTaintPackageAnalyzers_SharedCache` benchmark.
+
+- Baseline and thresholds: `.github/benchmarks/taint_benchmark_baseline.env`
+- Guard script: `tools/check_taint_benchmark.sh`
+
+Run the guard locally to check for regressions before opening a pull request:
+
+```bash
+bash tools/check_taint_benchmark.sh
+```
+
+If your change intentionally alters performance characteristics, update the baseline and commit it alongside your code:
+
+```bash
+BENCH_COUNT=10 bash tools/check_taint_benchmark.sh --update-baseline
+```
+
+<Warning>
+Always commit the updated baseline file together with the benchmark-related code change. A stale baseline will cause CI to fail on unrelated pull requests.
+</Warning>
+
+## Generate TLS rule data
+
+The TLS rule data in `rules/tls_config.go` is generated from Mozilla recommendations. Regenerate it whenever the upstream recommendations change.
+
+<Steps>
+  <Step title="Run go generate">
+    From the repository root:
+
+    ```bash
+    go generate ./...
+    ```
+  </Step>
+  <Step title="Install tlsconfig if needed">
+    If `go generate` fails with `exec: "tlsconfig": executable file not found in $PATH`, install the local generator and add it to `PATH`:
+
+    ```bash
+    export PATH="$(go env GOPATH)/bin:$PATH"
+    go install ./cmd/tlsconfig
+    go generate ./...
+    ```
+
+    To install the generator binary from outside the repository:
+
+    ```bash
+    go install github.com/securego/gosec/v2/cmd/tlsconfig@latest
+    ```
+  </Step>
+</Steps>
+
+## Release process
+
+<Steps>
+  <Step title="Tag the release">
+    Create an annotated tag and push it to trigger the release workflow:
+
+    ```bash
+    git tag v1.0.0 -m "Release version v1.0.0"
+    git push origin v1.0.0
+    ```
+
+    The workflow builds binaries and Docker images, then signs all artifacts.
+  </Step>
+  <Step title="Verify signatures">
+    Verify the Docker image signature:
+
+    ```bash
+    cosign verify --key cosign.pub ghcr.io/securego/gosec:<TAG>
+    ```
+
+    Verify a release archive signature:
+
+    ```bash
+    cosign verify-blob --key cosign.pub --signature gosec_<VERSION>_darwin_amd64.tar.gz.sig gosec_<VERSION>_darwin_amd64.tar.gz
+    ```
+  </Step>
+</Steps>
+
+## Docker image
+
+Build the image locally:
+
+```bash
+make image
+```
+
+Run gosec against a local project using the Docker image:
+
+```bash
+docker run --rm -it -w /<PROJECT>/ -v <YOUR_PROJECT_PATH>/<PROJECT>:/<PROJECT> ghcr.io/securego/gosec:latest /<PROJECT>/...
+```
+
+Set `-w` to the mounted project root so that module dependencies resolve correctly.

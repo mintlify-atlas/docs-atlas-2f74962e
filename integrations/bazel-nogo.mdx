@@ -1,0 +1,56 @@
+---
+title: "Integrate gosec with Bazel nogo"
+description: "Use gosec's goanalysis package as a golang.org/x/tools/go/analysis.Analyzer with Bazel's nogo framework for build-time security checks."
+---
+
+gosec provides a `goanalysis` package that exposes its rules as a standard `golang.org/x/tools/go/analysis.Analyzer`. This enables integration with any tool that supports the Go analysis framework, including Bazel's [nogo](https://github.com/bazelbuild/rules_go/blob/master/go/nogo.rst) framework for build-time checks.
+
+## Add gosec to a nogo BUILD rule
+
+In your Bazel `BUILD` or `WORKSPACE` file, add the goanalysis package as a nogo dependency:
+
+```starlark
+nogo(
+    name = "nogo",
+    deps = [
+        "@com_github_securego_gosec_v2//goanalysis",
+        # add more analyzers as needed
+    ],
+    visibility = ["//visibility:public"],
+)
+```
+
+This runs all gosec rules as part of your Bazel build. Any security findings cause the build to fail, just as compilation errors would.
+
+## Import path
+
+The goanalysis package import path is:
+
+```
+github.com/securego/gosec/v2/goanalysis
+```
+
+In Bazel's external repository notation:
+
+```
+@com_github_securego_gosec_v2//goanalysis
+```
+
+## How it works
+
+The `goanalysis` package wraps gosec's AST rules and SSA analyzers into a single `analysis.Analyzer` that conforms to the `golang.org/x/tools/go/analysis` interface. When integrated with nogo, gosec runs at build time against every Go package in the Bazel dependency graph.
+
+<Note>
+Taint analysis rules (G7xx) may have higher computational cost when run across large dependency graphs. Consider using `-include` to limit the active rule set if build times are affected.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Rules reference" icon="shield-halved" href="/rules/overview">
+    Browse all gosec rules to understand what gets checked.
+  </Card>
+  <Card title="Filtering" icon="filter" href="/usage/filtering">
+    Use include/exclude flags to control which rules run.
+  </Card>
+</CardGroup>

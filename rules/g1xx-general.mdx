@@ -1,0 +1,199 @@
+---
+title: "G1xx: General secure coding rules"
+description: "gosec G1xx rules detect hardcoded credentials, HTTP hardening issues, cookie misconfigurations, context propagation failures, and more."
+---
+
+The G1xx category covers a broad set of general secure coding issues in Go programs. It includes pattern-based AST checks for common mistakes like hardcoded credentials and missing error handling, as well as SSA-backed analyzers that reason about program flow to detect subtler issues such as context propagation failures, unsafe redirect policies, and insecure cookie configurations.
+
+## Rules summary
+
+| Rule | Description | Type |
+|------|-------------|------|
+| G101 | Look for hardcoded credentials | AST |
+| G102 | Bind to all interfaces | AST |
+| G103 | Audit the use of unsafe block | AST |
+| G104 | Audit errors not checked | AST |
+| G106 | Audit the use of `ssh.InsecureIgnoreHostKey` function | AST |
+| G107 | URL provided to HTTP request as taint input | AST |
+| G108 | Profiling endpoint is automatically exposed | AST |
+| G109 | Converting `strconv.Atoi` result to `int32/int16` | AST |
+| G110 | Detect `io.Copy` instead of `io.CopyN` when decompressing | AST |
+| G111 | Detect `http.Dir('/')` as a potential risk | AST |
+| G112 | Detect `ReadHeaderTimeout` not configured as a potential risk | AST |
+| G113 | HTTP request smuggling via conflicting headers or bare LF in body parsing | SSA |
+| G114 | Use of `net/http` serve function that has no support for setting timeouts | AST |
+| G115 | Type conversion which leads to integer overflow | SSA |
+| G116 | Detect Trojan Source attacks using bidirectional Unicode characters | AST |
+| G117 | Potential exposure of secrets via JSON/YAML/XML/TOML marshaling | AST |
+| G118 | Context propagation failure leading to goroutine/resource leaks | SSA |
+| G119 | Unsafe redirect policy may propagate sensitive headers | SSA |
+| G120 | Unbounded `ParseMultipartForm` in HTTP handlers can cause memory exhaustion | Taint |
+| G121 | Unsafe CrossOriginProtection bypass patterns | SSA |
+| G122 | Filesystem TOCTOU race risk in `filepath.Walk/WalkDir` callbacks | SSA |
+| G123 | TLS resumption may bypass `VerifyPeerCertificate` when `VerifyConnection` is unset | SSA |
+| G124 | Insecure HTTP cookie configuration missing Secure, HttpOnly, or SameSite attributes | SSA |
+
+## Rule configuration
+
+### G101 — Hardcoded credentials
+
+G101 scans string literals and variable assignments for values that look like passwords, tokens, or private keys. It combines pattern matching against field/variable names with an entropy check on the assigned value to reduce false positives.
+
+```json
+{
+  "G101": {
+    "pattern": "(?i)passwd|pass|password|pwd|secret|private_key|token",
+    "ignore_entropy": false,
+    "entropy_threshold": "80.0",
+    "per_char_threshold": "3.0",
+    "truncate": "32",
+    "min_entropy_length": "8"
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `pattern` | `(?i)passwd\|pass\|…` | Regex matched against variable/field names |
+| `ignore_entropy` | `false` | Skip entropy check when `true` |
+| `entropy_threshold` | `80.0` | Minimum total entropy to flag a literal |
+| `per_char_threshold` | `3.0` | Minimum bits-per-character threshold |
+| `truncate` | `32` | Maximum string length considered for entropy |
+| `min_entropy_length` | `8` | Minimum literal length before entropy is applied |
+
+### G104 — Unchecked errors
+
+G104 flags call sites where the returned `error` value is discarded. An allowlist can be configured per package to suppress noise from functions where ignoring errors is an accepted pattern.
+
+```json
+{
+  "G104": {
+    "ioutil": ["WriteFile"]
+  }
+}
+```
+
+The key is the package name (not the full import path) and the value is a list of function names within that package whose errors may be safely ignored.
+
+### G111 — HTTP directory serving
+
+G111 reports calls to `http.FileServer(http.Dir("/"))` or similar patterns that serve the entire filesystem. The detection regex can be replaced with a custom pattern:
+
+```json
+{
+  "G111": {
+    "pattern": "http\\.Dir\\(\"\\/\"\\)|http\\.Dir\\('\\/'\\)"
+  }
+}
+```
+
+### G117 — Secret serialization
+
+G117 flags struct fields whose names match a sensitive pattern when the containing struct is passed to a marshaling function (`json.Marshal`, `yaml.Marshal`, `xml.Marshal`, `toml.Encode`, etc.). The field-name pattern is configurable:
+
+```json
+{
+  "G117": {
+    "pattern": "(?i)secret|token|password"
+  }
+}
+```
+
+## G118 — Context propagation failure
+
+G118 uses SSA-level analysis to detect three distinct classes of context propagation failure, all of which can lead to goroutine leaks or resource exhaustion (CWE-400).
+
+<AccordionGroup>
+  <Accordion title="Pattern 1: Lost cancel function">
+    Reports when `context.WithCancel`, `context.WithTimeout`, or `context.WithDeadline` returns a cancel function that is never called, potentially keeping goroutines or timers alive indefinitely.
+
+    ```go
+    // Flagged: cancel never called
+    func work(ctx context.Context) {
+        child, _ := context.WithTimeout(ctx, time.Second)
+        _ = child
+    }
+
+    // Safe: cancel deferred
+    func work(ctx context.Context) {
+        child, cancel := context.WithTimeout(ctx, time.Second)
+        defer cancel()
+        _ = child
+    }
+    ```
+
+    The following patterns are all recognized as safe — the cancel responsibility is considered discharged:
+
+    | Pattern | Reason |
+    |---------|--------|
+    | `defer cancel()` | Direct deferred call |
+    | `defer func() { cancel() }()` | Cancel in a deferred closure |
+    | `cancelCopy := cancel; defer cancelCopy()` | Alias via variable |
+    | `return ctx, cancel` | Cancel returned to caller |
+    | `s.cancelFn = cancel` + method `s.cancelFn()` | Stored in struct field, called via receiver |
+    | `s.cancel = cancel; defer s.cancel()` | Stored in struct field, deferred |
+    | `s.cancel = cancel; defer func() { s.cancel() }()` | Stored in struct field, deferred closure |
+    | Struct containing field is returned | Caller inherits cancel responsibility |
+    | `var cancel CancelFunc` in `init()` + `cancel()` elsewhere | Package-level variable assigned in init |
+
+    Example of the package-level variable pattern:
+
+    ```go
+    // Safe: cancel stored in package-level variable and called in signal handler
+    var cancel context.CancelFunc
+
+    func init() {
+        ctx, c := context.WithCancel(context.Background())
+        cancel = c
+    }
+
+    func handleShutdown() {
+        cancel() // Called from signal handler
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Pattern 2: Goroutine uses background context when request context is available">
+    Reports when a goroutine spawned inside an HTTP handler or a function accepting a `context.Context` or `*http.Request` uses `context.Background()` or `context.TODO()` instead of the request-scoped context. This causes the goroutine to ignore cancellation and deadline signals from the caller.
+
+    ```go
+    // Flagged
+    func handler(w http.ResponseWriter, r *http.Request) {
+        go func() {
+            ctx := context.Background() // ignores request context
+            doWork(ctx)
+        }()
+    }
+    ```
+
+    The fix is to capture and pass `r.Context()` (or the function's `ctx` parameter) into the goroutine.
+  </Accordion>
+
+  <Accordion title="Pattern 3: Long-running loop without ctx.Done() guard">
+    Reports an infinite loop that performs blocking I/O — such as `http.Get`, `db.Query`, `time.Sleep`, or interface methods like `Read`/`Write` — but never checks `ctx.Done()`, making the loop impossible to cancel.
+
+    ```go
+    // Flagged
+    func poll(ctx context.Context) {
+        for {
+            http.Get("https://example.com") // blocks, no cancellation path
+            time.Sleep(time.Second)
+        }
+    }
+
+    // Safe
+    func poll(ctx context.Context) {
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            case <-time.After(time.Second):
+                http.Get("https://example.com")
+            }
+        }
+    }
+    ```
+
+    Loops with an external exit path (e.g. a `break` statement or a bounded `for i < n` condition) are not flagged.
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,70 @@
+---
+title: "Export gosec results to SonarQube"
+description: "Use gosec's SonarQube output format to import security findings into SonarQube using the generic issue import format and sonar.externalIssuesReportPaths."
+---
+
+gosec can export results in SonarQube's [generic issue import format](https://docs.sonarqube.org/latest/analysis/generic-issue/), allowing you to import security findings directly into your SonarQube instance alongside other code quality metrics.
+
+## Generate a SonarQube report
+
+Use the `-fmt=sonarqube` flag to produce a report in the generic issue format:
+
+```bash
+gosec -fmt sonarqube -out gosec-report.json ./...
+```
+
+## Import into SonarQube
+
+Pass the report path to SonarQube's scanner using the `sonar.externalIssuesReportPaths` property:
+
+<Tabs>
+  <Tab title="sonar-project.properties">
+    ```properties
+    sonar.projectKey=my-project
+    sonar.sources=.
+    sonar.externalIssuesReportPaths=gosec-report.json
+    ```
+  </Tab>
+  <Tab title="CLI flag">
+    ```bash
+    sonar-scanner \
+      -Dsonar.projectKey=my-project \
+      -Dsonar.sources=. \
+      -Dsonar.externalIssuesReportPaths=gosec-report.json
+    ```
+  </Tab>
+</Tabs>
+
+## CI pipeline example
+
+Run gosec and import results as part of a CI pipeline:
+
+```yaml
+# GitHub Actions example
+- name: Run Gosec
+  run: gosec -no-fail -fmt sonarqube -out gosec-report.json ./...
+
+- name: SonarQube Scan
+  uses: SonarSource/sonarqube-scan-action@master
+  env:
+    SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+  with:
+    args: >
+      -Dsonar.externalIssuesReportPaths=gosec-report.json
+```
+
+<Note>
+Use `-no-fail` when running gosec in CI if you want SonarQube to control the quality gate rather than gosec's exit code.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Output formats" icon="file-export" href="/usage/output-formats">
+    See all available output formats including SARIF, JSON, and HTML.
+  </Card>
+  <Card title="GitHub Actions" icon="github" href="/integrations/github-actions">
+    Integrate gosec with GitHub code scanning via SARIF.
+  </Card>
+</CardGroup>

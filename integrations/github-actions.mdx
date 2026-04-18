@@ -1,0 +1,105 @@
+---
+title: "gosec GitHub Actions integration"
+description: "Run gosec as a GitHub Action, upload SARIF results to GitHub code scanning, and configure private module access for secure CI pipelines."
+---
+
+gosec provides an official GitHub Action that runs the security scanner without requiring any local installation. Use it to scan on every push or pull request and optionally upload SARIF results to GitHub's code scanning dashboard for persistent tracking.
+
+## Basic workflow
+
+Add gosec to your GitHub Actions workflow with the `securego/gosec@master` tag, which is pinned to the latest stable release:
+
+```yaml
+name: Run Gosec
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    env:
+      GO111MODULE: on
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v3
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: ./...
+```
+
+The `args` input accepts any flags you would pass to the `gosec` CLI.
+
+## GitHub code scanning with SARIF
+
+Upload SARIF results to GitHub code scanning to track findings over time and see them inline in pull requests:
+
+```yaml
+name: "Security Scan"
+on:
+  push:
+  schedule:
+    - cron: '0 0 * * 0'
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    env:
+      GO111MODULE: on
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v3
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt sarif -out results.sarif ./...'
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: results.sarif
+```
+
+<Note>
+Use `-no-fail` when uploading SARIF so the action doesn't block the workflow. GitHub's code scanning features handle alerting from the uploaded results.
+</Note>
+
+## Scanning projects with private modules
+
+If your project imports private Go modules, configure authentication so gosec can fetch dependencies:
+
+```yaml
+- name: Run Gosec Security Scanner
+  uses: securego/gosec@master
+  env:
+    GOPRIVATE: github.com/your-org/*
+    GITHUB_AUTHENTICATION_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+  with:
+    args: ./...
+```
+
+| Environment variable | Description |
+|---|---|
+| `GOPRIVATE` | Comma-separated list of module path prefixes to treat as private |
+| `GITHUB_AUTHENTICATION_TOKEN` | GitHub token with read access to your private repositories |
+
+## Action reference
+
+The action runs gosec inside a Docker container using the `ghcr.io/securego/gosec` image.
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `args` | Yes | `-h` | Arguments passed directly to the `gosec` CLI |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Output formats" icon="file-export" href="/usage/output-formats">
+    Learn all available report formats including SARIF, JSON, and more.
+  </Card>
+  <Card title="Filtering results" icon="filter" href="/usage/filtering">
+    Filter by rule, severity, confidence, and path.
+  </Card>
+</CardGroup>

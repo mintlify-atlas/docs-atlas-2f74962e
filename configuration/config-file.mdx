@@ -1,0 +1,335 @@
+---
+title: "gosec configuration file reference"
+description: "Configure gosec behavior with a JSON config file: global settings, per-rule options for G101, G104, G111, G117, and file permission rules."
+---
+
+gosec accepts a JSON configuration file that controls global scanner behavior and provides per-rule tuning. Pass the file path with the `-conf` flag. Any setting in the config file can coexist with CLI flags — CLI flags for overlapping options take precedence.
+
+```bash
+gosec -conf config.json ./...
+```
+
+## File structure
+
+A gosec config file is a JSON object whose keys are either the reserved string `"global"` (for scanner-wide settings) or a rule ID such as `"G101"` (for per-rule settings). Unrecognised keys are silently ignored.
+
+```json
+{
+  "global": {
+    "nosec": "enabled",
+    "audit": "enabled"
+  },
+  "G101": {
+    "pattern": "(?i)passwd|pass|password|pwd|secret|private_key|token",
+    "ignore_entropy": false,
+    "entropy_threshold": "80.0",
+    "per_char_threshold": "3.0",
+    "truncate": "32",
+    "min_entropy_length": "8"
+  },
+  "G104": {
+    "ioutil": ["WriteFile"]
+  }
+}
+```
+
+---
+
+## Global settings
+
+The `"global"` object accepts the following options.
+
+<AccordionGroup>
+  <Accordion title="nosec">
+    Overrides every `#nosec` directive in the codebase. When set to `"enabled"` or `"true"`, gosec reports all findings even if a line is annotated with `#nosec`.
+
+    ```json
+    {
+      "global": {
+        "nosec": "enabled"
+      }
+    }
+    ```
+
+    Equivalent CLI flag: `-nosec=true`
+  </Accordion>
+
+  <Accordion title="audit">
+    Enables audit mode. In audit mode, gosec runs additional checks that are too noisy for everyday scans — for example, flagging every unchecked error rather than only in specific patterns.
+
+    ```json
+    {
+      "global": {
+        "audit": "enabled"
+      }
+    }
+    ```
+
+    Equivalent CLI flag: `-enable-audit`
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  Both `nosec` and `audit` accept either `"enabled"` or `"true"` as the active value.
+</Note>
+
+---
+
+## Per-rule configuration
+
+Per-rule settings are top-level JSON objects keyed by rule ID. Only the rules listed below accept configuration; all other rules use fixed internal defaults.
+
+### G101 — Hardcoded credentials
+
+G101 scans variable names and string values for patterns that suggest hardcoded credentials, optionally combining that with Shannon entropy analysis to reduce false positives.
+
+```json
+{
+  "G101": {
+    "pattern": "(?i)passwd|pass|password|pwd|secret|private_key|token",
+    "ignore_entropy": false,
+    "entropy_threshold": "80.0",
+    "per_char_threshold": "3.0",
+    "truncate": "32",
+    "min_entropy_length": "8"
+  }
+}
+```
+
+<AccordionGroup>
+  <Accordion title="pattern">
+    A Go regular expression matched against variable and field names. Identifiers whose names match are treated as potential credential holders and subject to further checks.
+
+    **Default:** `(?i)passwd|pass|password|pwd|secret|private_key|token`
+
+    Provide a custom pattern to narrow or broaden detection scope:
+
+    ```json
+    {
+      "G101": {
+        "pattern": "(?i)api_key|bearer|auth_token"
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="ignore_entropy">
+    When `true`, gosec flags every identifier that matches `pattern` regardless of the assigned value's entropy. When `false` (the default), gosec also evaluates the Shannon entropy of the literal value and only flags high-entropy strings.
+
+    ```json
+    {
+      "G101": {
+        "ignore_entropy": false
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="entropy_threshold">
+    The minimum total Shannon entropy (as a string-encoded float) a credential value must have before it is flagged. Higher values mean fewer — but higher-confidence — findings.
+
+    **Default:** `"80.0"`
+
+    ```json
+    {
+      "G101": {
+        "entropy_threshold": "70.0"
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="per_char_threshold">
+    The minimum average entropy per character (as a string-encoded float). A long but repetitive string can pass the total `entropy_threshold` while still failing this per-character check.
+
+    **Default:** `"3.0"`
+
+    ```json
+    {
+      "G101": {
+        "per_char_threshold": "2.5"
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="truncate">
+    The number of characters to keep when truncating long string literals before entropy analysis. This prevents very long strings from inflating the total entropy score.
+
+    **Default:** `"32"`
+
+    ```json
+    {
+      "G101": {
+        "truncate": "64"
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="min_entropy_length">
+    The minimum length a string must be before entropy analysis is applied. Strings shorter than this value are not evaluated for entropy and will not be flagged on entropy grounds alone.
+
+    **Default:** `"8"`
+
+    ```json
+    {
+      "G101": {
+        "min_entropy_length": "12"
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### G104 — Unchecked errors
+
+G104 reports calls whose returned `error` value is discarded. You can allowlist specific functions whose errors are safe to ignore in your codebase.
+
+The configuration is a JSON object where each key is a **package name** (as it appears in source, e.g. `ioutil`, not the full import path) and the value is an array of **function names** within that package to exempt.
+
+```json
+{
+  "G104": {
+    "ioutil": ["WriteFile"],
+    "os": ["Close", "Remove"]
+  }
+}
+```
+
+<Note>
+  Package names are matched against the identifier used in source code, not the full import path. For example, use `"ioutil"` rather than `"io/ioutil"`.
+</Note>
+
+---
+
+### G111 — HTTP directory serving
+
+G111 flags uses of `http.Dir` with arguments that expose the filesystem root or other sensitive directories. The detection is driven by a regular expression that you can replace with a project-specific pattern.
+
+```json
+{
+  "G111": {
+    "pattern": "http\\.Dir\\(\"\\/\"\\)|http\\.Dir\\('\\/'\\)"
+  }
+}
+```
+
+<AccordionGroup>
+  <Accordion title="pattern">
+    A Go regular expression matched against the source code text of `http.Dir(...)` call arguments. When a custom value is provided it **replaces** the built-in default entirely.
+
+    Use this to detect additional dangerous paths relevant to your deployment:
+
+    ```json
+    {
+      "G111": {
+        "pattern": "http\\.Dir\\(\"\\/\"\\)|http\\.Dir\\(\"\\/var\\/www\"\\)"
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### G117 — Secret serialization
+
+G117 detects struct fields whose names suggest they hold secrets and which are tagged for JSON, YAML, XML, or TOML serialization — a pattern that can inadvertently expose secrets in API responses or log output.
+
+```json
+{
+  "G117": {
+    "pattern": "(?i)secret|token|password"
+  }
+}
+```
+
+<AccordionGroup>
+  <Accordion title="pattern">
+    A Go regular expression matched against struct field names. Fields whose names match the pattern and are annotated with a serialization tag (`json:`, `yaml:`, `xml:`, or `toml:`) are flagged.
+
+    Narrow or extend the pattern to match the naming conventions in your codebase:
+
+    ```json
+    {
+      "G117": {
+        "pattern": "(?i)secret|token|password|private_key|api_key|credential"
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### G301, G302, G306, G307 — File permission rules
+
+These four rules check that files and directories are not created with permissions that are broader than necessary. Each rule can be configured with a stricter maximum permitted mode expressed as an **octal literal string**.
+
+| Rule | Default check | What it covers |
+|------|--------------|----------------|
+| G301 | `0o750` | Directory creation (`os.Mkdir`, `os.MkdirAll`) |
+| G302 | `0o600` | File creation and `os.Chmod` |
+| G306 | `0o600` | `os.WriteFile` and `ioutil.WriteFile` |
+| G307 | `0o600` | `os.Create` (implicit mode 0666) |
+
+```json
+{
+  "G301": "0o600",
+  "G302": "0o600",
+  "G306": "0o750",
+  "G307": "0o750"
+}
+```
+
+<Warning>
+  Permission values must be provided as octal literal strings (e.g. `"0o600"`). Standard decimal integers like `384` are not accepted.
+</Warning>
+
+Setting a value tightens the threshold: any permission mode **greater than** the configured value is flagged. For example, setting G301 to `"0o600"` means that creating a directory with mode `0o700` or wider will raise a finding.
+
+---
+
+## Complete example
+
+The following shows a config file combining global settings with per-rule configuration for a project that uses several customised rules.
+
+```json
+{
+  "global": {
+    "nosec": "enabled",
+    "audit": "enabled"
+  },
+  "G101": {
+    "pattern": "(?i)api_key|bearer|secret|token|password|private_key",
+    "ignore_entropy": false,
+    "entropy_threshold": "75.0",
+    "per_char_threshold": "3.0",
+    "truncate": "32",
+    "min_entropy_length": "10"
+  },
+  "G104": {
+    "os": ["Close"],
+    "ioutil": ["WriteFile"]
+  },
+  "G111": {
+    "pattern": "http\\.Dir\\(\"\\/\"\\)|http\\.Dir\\('\\/'\\)"
+  },
+  "G117": {
+    "pattern": "(?i)secret|token|password|credential|private_key"
+  },
+  "G301": "0o600",
+  "G302": "0o600",
+  "G306": "0o600",
+  "G307": "0o600"
+}
+```
+
+Pass the file at scan time:
+
+```bash
+gosec -conf config.json ./...
+```
